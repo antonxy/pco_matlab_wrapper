@@ -12,12 +12,40 @@ clibgen.generateLibraryDefinition(...
     "IncludePath", "C:\Users\fucko\AppData\Roaming\PCO Digital Camera Toolbox\pco.sdk\include"...
 )
 
+% Add extra definitions. This is designed in matlab to be done after
+% building the defintion by manually editing the definition.
+% But I don't like that, because then I can't easily rebuild the definition
+% when I change something in the c++ file.
+thedefine = definepco_wrapper;
+
+% TODO Would be more robust not to do this by index
+ImageStackDefinition = thedefine.Classes(1);
+
+getDataDefinition = addMethod(ImageStackDefinition, ...
+   "uint16_t const * ImageStack::getData(int num_images,int cols,int rows)", ...
+   "Description", "clib.pco_wrapper.ImageStack.getData    Method of C++ class ImageStack"); % This description is shown as help to user. Modify it to appropriate description.
+defineArgument(getDataDefinition, "num_images", "int32");
+defineArgument(getDataDefinition, "cols", "int32");
+defineArgument(getDataDefinition, "rows", "int32");
+defineOutput(getDataDefinition, "RetVal", "uint16", ["num_images", "cols", "rows"]);
+validate(getDataDefinition);
+
+% TODO Would be more robust not to do this by index
+PCOCameraDefinition = thedefine.Classes(3);
+
+set_segment_sizesDefinition = addMethod(PCOCameraDefinition, ...
+    "void PCOCamera::set_segment_sizes(DWORD [4] pagesPerSegment)", ...
+    "Description", "clib.pco_wrapper.PCOCamera.set_segment_sizes    Method of C++ class PCOCamera"); % This description is shown as help to user. Modify it to appropriate description.
+defineArgument(set_segment_sizesDefinition, "pagesPerSegment", "uint32", "input", 4);
+validate(set_segment_sizesDefinition);
+
+validate(thedefine);
+
+disp("Added to definition")
+
 %% Build library
 % Build dll from library definition
 % Requires Visual Studio (2019?) to be installed.
 % Maybe mingw also works?
-build(definepco_wrapper);
+build(thedefine);
 
-%% Using the wrapper:
-addpath pco_wrapper;
-c = clib.pco_wrapper.PCOCamera(0);

@@ -13,6 +13,9 @@
 #include <windows.h>
 #include <cstdio>
 #include <iostream>
+#include <sstream>
+#include <iomanip>
+#include <memory>
 
 #include "pco_err.h"
 #include "sc2_SDKStructures.h"
@@ -37,23 +40,81 @@ void testStdout() {
     std::cerr << "Hello from stderr" << std::endl;
 }
 
+class ImageStack {
+public:
+    int num_images;
+    int cols;
+    int rows;
+
+    /** I think in matlab 2019 there is no way to make the matrix have the right size automatically.
+        So you have to take the size from the Image properties and pass it in here */
+    const uint16_t* getData(int num_images, int cols, int rows) {
+        if (num_images != this->num_images || cols != this->cols || rows != this->rows) {
+            throw std::exception("Dimensions passed in do not match image dimensions");
+        }
+        return data.get();
+    }
+
+    uint16_t* getDataMut() {
+        return data.get();
+    }
+
+    ImageStack(int num_images, int cols, int rows)
+        : num_images(num_images), cols(cols), rows(rows)
+    {
+        data = std::unique_ptr<uint16_t[]>(new uint16_t[num_images * cols * rows]);
+    }
+private:
+    std::unique_ptr<uint16_t[]> data;
+};
+
+ImageStack getImage() {
+    ImageStack im(3, 100, 100);
+
+    uint16_t* data = im.getDataMut();
+    int i = 0;
+    for (int ch = 0; ch < im.num_images; ++ch) {
+        for (int c = 0; c < im.cols; ++c) {
+            for (int r = 0; r < im.rows; ++r) {
+                data[i] = ch;
+                ++i;
+            }
+        }
+    }
+
+    return im;
+}
+
 class PCOError : public std::exception {
 public:
-    PCOError(int error_code) {}
-    virtual const char* what() const noexcept {
-        return "PCO Error";
+    PCOError(int error_code) {
+        char szErrorString[100];
+        PCO_GetErrorTextSDK(error_code, szErrorString, 100);
+
+        std::stringstream ss;
+        //ss << "PCO Error 0x";
+        //ss << std::setfill('0') << std::setw(sizeof(int) * 2)
+        //    << std::hex << error_code;
+        //ss << " - ";
+        ss << szErrorString;
+
+        message = ss.str();
     }
+
+    virtual const char* what() const noexcept {
+        return message.c_str();
+    }
+private:
+    std::string message;
 };
 
 class PCOCamera {
 public:
-    PCOCamera(WORD wCamNum) {
-
-    }
+    PCOCamera() { }
 
     /** Connects to the camera */
-    void open() {
-        int iRet = PCO_OpenCamera(&cam, 0);
+    void open(WORD wCamNum) {
+        int iRet = PCO_OpenCamera(&cam, wCamNum);
         if (iRet != PCO_NOERROR)
         {
             throw PCOError(iRet);
@@ -71,7 +132,7 @@ public:
         WORD RecordingState;
         iRet = PCO_GetRecordingState(cam, &RecordingState);
         //0 = stopped, 1 = running
-        //Stop camera recording
+        //Stop recording if camera is recording
         if (RecordingState)
         {
             iRet = PCO_SetRecordingState(cam, 0);
@@ -89,6 +150,24 @@ public:
         }
     }
 
+    /**
+    * Set framerate and exposure time 
+    * @param frameRateMode
+    *        0 - Auto mode, camera decides
+    *        1 - Frame rate has priority
+    *        2 - Exposure time has priority
+    *        3 - Strict, error if the two don't match
+    */
+    void set_framerate_exposure(WORD frameRateMode, DWORD frameRate_mHz, DWORD expTime_ns) {
+        WORD frameRateStatus;
+        int iRet = PCO_SetFrameRate(cam, &frameRateStatus, frameRateMode, &frameRate_mHz, &expTime_ns);
+        if (iRet != PCO_NOERROR)
+        {
+            throw PCOError(iRet);
+        }
+    }
+
+    /** Validates the configuration of the camera and sets the camera ready for recording */
     void arm_camera() {
         int iRet;
         //Arm camera - this makes sure any previous configuration changes are applied
@@ -111,125 +190,219 @@ public:
         }
     }
 
-    void setup_recording_segement() {
+    void print_transferparameters()
+    {
+        PCO_CameraType strCamType;
+        DWORD iRet;
+        strCamType.wSize = sizeof(PCO_CameraType);
+        iRet = PCO_GetCameraType(cam, &strCamType);
+        if (iRet != PCO_NOERROR)
+        {
+            printf("PCO_GetCameraType failed with errorcode 0x%x\n", iRet);
+            return;
+        }
+
+        if (strCamType.wInterfaceType == INTERFACE_CAMERALINK)
+        {
+            PCO_SC2_CL_TRANSFER_PARAM cl_par;
+
+            iRet = PCO_GetTransferParameter(cam, (void*)&cl_par, sizeof(PCO_SC2_CL_TRANSFER_PARAM));
+            printf("Camlink Settings:\nBaudrate:    %u\nClockfreq:   %u\n", cl_par.baudrate, cl_par.ClockFrequency);
+            printf("Dataformat:  %u 0x%x\nTransmit:    %u\n", cl_par.DataFormat, cl_par.DataFormat, cl_par.Transmit);
+        }
     }
 
-    int transfer_mip(WORD Segment) {
+    void set_segment_sizes(DWORD pagesPerSegment[4]) {
+        //TODO Check PCO_SetStorageMode - maybe allows transfer while recording
+        int iRet = PCO_SetCameraRamSegmentSize(cam, pagesPerSegment);
+        if (iRet != PCO_NOERROR)
+        {
+            throw PCOError(iRet);
+        }
+
+    }
+
+    void set_active_segment(WORD segment) {
+        int iRet = PCO_SetActiveRamSegment(cam, segment);
+        if (iRet != PCO_NOERROR)
+        {
+            throw PCOError(iRet);
+        }
+    }
+
+    void clear_active_segment(WORD segment) {
+        int iRet = PCO_ClearRamSegment(cam);
+        if (iRet != PCO_NOERROR)
+        {
+            throw PCOError(iRet);
+        }
+    }
+
+    void start_recording() {
+        int iRet = PCO_SetRecordingState(cam, 1);
+        if (iRet != PCO_NOERROR)
+        {
+            throw PCOError(iRet);
+        }
+    }
+
+    void stop_recording() {
+        int iRet = PCO_SetRecordingState(cam, 0);
+        if (iRet != PCO_NOERROR)
+        {
+            throw PCOError(iRet);
+        }
+    }
+
+    /** Transfers all images from the segment and performs MIP on the fly */
+    ImageStack transfer_mip(WORD Segment) {
         int iRet;
-        int success = 0;
 
         DWORD ValidImageCnt, MaxImageCnt;
         iRet = PCO_GetNumberOfImagesInSegment(cam, Segment, &ValidImageCnt, &MaxImageCnt);
+        if (iRet != PCO_NOERROR)
+        {
+            throw PCOError(iRet);
+        }
 
         //Get image size and settings from camera
-        DWORD bufsize, StatusDll, StatusDrv, set;
         WORD XResAct, YResAct, XBin, YBin;
         WORD RoiX0, RoiY0, RoiX1, RoiY1;
         iRet = PCO_GetSegmentImageSettings(cam, Segment, &XResAct, &YResAct,
             &XBin, &YBin, &RoiX0, &RoiY0, &RoiX1, &RoiY1);
+        if (iRet != PCO_NOERROR)
+        {
+            throw PCOError(iRet);
+        }
 
+        //Number of buffers that will be used for transfering images in parallel
+        //It seems there is no advantage to using more than 2
+        const int NUMBUF = 2;
 
-        //Allocate 2 buffers
-        HANDLE BufEvent[2] = { NULL, NULL };
-        short BufNum[2] = { -1, -1 };
-        WORD* BufAdr[2] = { NULL, NULL };
+        //Allocate buffers
+        HANDLE BufEvent[NUMBUF];
+        short BufNum[NUMBUF];
+        WORD* BufAdr[NUMBUF];
 
-        bufsize = XResAct * YResAct * sizeof(WORD);
-        for (int b = 0; b < 2; b++)
+        for (int i = 0; i < NUMBUF; ++i)
+        {
+            BufEvent[i] = NULL;
+            BufNum[i] = -1;
+            BufAdr[i] = NULL;
+        }
+
+        int numPix = XResAct * YResAct;
+        DWORD bufsize = numPix * sizeof(WORD);
+        for (int b = 0; b < NUMBUF; b++)
         {
             iRet = PCO_AllocateBuffer(cam, &BufNum[b], bufsize, &BufAdr[b], &BufEvent[b]);
-            if (iRet != PCO_NOERROR) {
-                throw std::exception("PCO_AllocateBuffer failed");
+            if (iRet != PCO_NOERROR)
+            {
+                throw PCOError(iRet);
             }
         }
 
-        //TODO use c++ instead of malloc
-        WORD* MIP_Image = (WORD*)malloc(bufsize); //Should actually be an image buffer, not just int
-        if (MIP_Image == NULL)
-        {
-            throw std::exception("malloc failed, out of memory");
-        }
-        memset(MIP_Image, 0, bufsize);
+        ImageStack MIP_Image(1, XResAct, YResAct);
+        uint16_t* MIP_ImageData = MIP_Image.getDataMut();
 
         //Read from camera ram
         iRet = PCO_SetImageParameters(cam, XResAct, YResAct, IMAGEPARAMETERS_READ_FROM_SEGMENTS, NULL, 0);
+        if (iRet != PCO_NOERROR)
+        {
+            throw PCOError(iRet);
+        }
 
-        //printf("Grab recorded images from camera actual valid %d\n", ValidImageCnt);
+        printf("Grab recorded images from camera actual valid %d\n", ValidImageCnt);
 
         //Use two buffers. Start two transfers in the beginning.
         //Wait for the first one to finish, process the data, then start it again for the next image and switch the buffers.
         //This way always at least one buffer is transferring.
 
+        LARGE_INTEGER frequency;
+        LARGE_INTEGER start;
+        LARGE_INTEGER end;
+        QueryPerformanceFrequency(&frequency);
+        QueryPerformanceCounter(&start);
+
         //Start two image transfers
-        for (int currentImageIdx = 0; currentImageIdx < ValidImageCnt && currentImageIdx < 2; ++currentImageIdx) {
-            iRet = PCO_AddBufferEx(cam, currentImageIdx, currentImageIdx, BufNum[currentImageIdx], XResAct, YResAct, 16);
+        //!! Camera indexes start at 1
+        for (int currentImageIdx = 1; currentImageIdx <= ValidImageCnt && currentImageIdx <= NUMBUF; ++currentImageIdx) {
+            //printf("Start transfer %d @ buf %d\n", currentImageIdx, currentImageIdx - 1);
+            iRet = PCO_AddBufferEx(cam, currentImageIdx, currentImageIdx, BufNum[currentImageIdx - 1], XResAct, YResAct, 16);
             if (iRet != PCO_NOERROR) {
-                throw std::exception("PCO_AddBufferEx failed");
-                //success = -1;
-                //goto error;
+                printf("Failed to start transfer, img idx %d, buf idx %d\n", currentImageIdx, currentImageIdx - 1);
+                throw std::exception("Failed to start image transfer");
             }
         }
 
         int currentBufferIdx = 0;
-        for (int currentImageIdx = 0; currentImageIdx < ValidImageCnt; ++currentImageIdx) {
+        for (int currentImageIdx = 1; currentImageIdx <= ValidImageCnt; ++currentImageIdx) {
             //wait for image transfer
+            //printf("wait for transfer %d @ buf %d\n", currentImageIdx, currentBufferIdx);
             DWORD waitstat = WaitForSingleObject(BufEvent[currentBufferIdx], INFINITE);
             if (waitstat == WAIT_OBJECT_0)
             {
                 ResetEvent(BufEvent[currentBufferIdx]);
+                DWORD StatusDll = 0;
+                DWORD StatusDrv = 0;
                 iRet = PCO_GetBufferStatus(cam, BufNum[currentBufferIdx], &StatusDll, &StatusDrv);
 
                 //!!! IMPORTANT StatusDrv must always be checked for errors 
                 if (StatusDrv != PCO_NOERROR)
                 {
-                    //printf("buf%02d error status 0x%08x m %02d ", currentBufferIdx, StatusDrv, currentImageIdx);
-                    throw std::exception("buffer got error status");
-                    //success = -1;
-                    //goto error;
+                    printf("buf%02d error status 0x%08x m %02d\n", currentBufferIdx, StatusDrv, currentImageIdx);
+                    throw std::exception("Buffer error status");
                 }
             }
             else
             {
-                //printf("Wait for buffer failed\n");
+                printf("Wait for buffer failed\n");
                 throw std::exception("Wait for buffer failed");
-                //success = -1;
-                //goto error;
             }
+
+            //printf("received transfer %d\n", currentImageIdx);
 
             //fold image into MIP
-            for (WORD pix = 0; pix < XResAct * YResAct; ++pix) {
-                //TODO Check: Visual Studio thinks something is wrong here
-                MIP_Image[pix] = max(MIP_Image[pix], BufAdr[currentBufferIdx][pix]);
-            }
-
-            //start next image transfer
-            if (currentImageIdx + 2 < ValidImageCnt) {
-                iRet = PCO_AddBufferEx(cam, currentImageIdx + 2, currentImageIdx + 2, BufNum[currentBufferIdx], XResAct, YResAct, 16);
-                if (iRet != PCO_NOERROR) {
-                    throw std::exception("PCO_AddBufferEx for next transfer failed");
-                    //success = -1;
-                    //goto error;
+            for (int pix = 0; pix < numPix; ++pix) {
+                WORD val = BufAdr[currentBufferIdx][pix];
+                if (val > MIP_ImageData[pix])
+                {
+                    MIP_ImageData[pix] = val;
                 }
             }
 
-            currentBufferIdx = (currentBufferIdx + 1) % 2; // Switch buffer
+            //printf("processed image %d\n", currentImageIdx);
+
+            //start next image transfer
+            if (currentImageIdx + NUMBUF <= ValidImageCnt) {
+                //printf("start transfer %d @ buf %d\n", currentImageIdx + NUMBUF, currentBufferIdx);
+                iRet = PCO_AddBufferEx(cam, currentImageIdx + NUMBUF, currentImageIdx + NUMBUF, BufNum[currentBufferIdx], XResAct, YResAct, 16);
+                if (iRet != PCO_NOERROR) {
+                    printf("Failed to start following transfer, img idx %d, buf idx %d\n", currentImageIdx, currentBufferIdx);
+                    throw std::exception("Failed to start next image transfer");
+                }
+            }
+
+            currentBufferIdx = (currentBufferIdx + 1) % NUMBUF; // Switch buffer
         }
 
-        //TODO Do something with the image
-        printf("First 100 pixels of the MIP:\n");
-        for (int i = 0; i < XResAct * YResAct && i < 100; ++i) {
-            printf("%d ", i);
-        }
-        printf("\n");
+        QueryPerformanceCounter(&end);
+        double interval = (double)(end.QuadPart - start.QuadPart) / frequency.QuadPart;
+        printf("Transfered %d images in %f seconds\n", ValidImageCnt, interval);
+        double mb_per_image = double(numPix) * 3 / 2 / 1e6;
+        printf("Image size: %d x %d - %f MB\n", XResAct, YResAct, mb_per_image);
+        double mb_per_sec = mb_per_image * ValidImageCnt / interval;
+        printf("Transfer speed: %f MB/s\n", mb_per_sec);
 
-    error:
+        //TODO properly deallocate in case of exception
+
         //!!! IMPORTANT PCO_CancelImages must always be called, after PCO_AddBuffer...() loops
         iRet = PCO_CancelImages(cam);
         for (int b = 0; b < 2; b++) {
             iRet = PCO_FreeBuffer(cam, BufNum[b]);
         }
-        free(MIP_Image);
-        return success;
+
+        return MIP_Image;
     }
 
     void close() {
