@@ -11,13 +11,13 @@ c = clib.pco_wrapper.PCOCamera();
 
 % Opens the stdout console for matlab that is normally hidden
 % the library can log some messages here
-% clib.pco_wrapper.openConsole();
+clib.pco_wrapper.openConsole();
 
 c.open(0);
 
 %% 
-%c.reset_camera_settings();
-%c.set_framerate_exposure(1, 1e6, 1e6); % 1kHz, 1ms
+c.reset_camera_settings();
+c.set_framerate_exposure(1, 1e6, 1e6); % 1kHz, 1ms
 %c.set_segment_sizes([...]);
 c.clear_active_segment();
 
@@ -26,11 +26,11 @@ c.arm_camera();
 % This is not accurate at all. Better record fixed number of frames.
 % But I have not implemented that yet
 c.start_recording();
-pause(5); 
+pause(1); 
 c.stop_recording();
 
 %%
-image = c.transfer_mip(1);
+image = c.transfer_mip(1, 1, 100, 10);
 
 %%
 c.close()
@@ -42,4 +42,4 @@ c.close()
 % I think there is no other way.
 im = image.getData(image.num_images, image.cols, image.rows);
 figure;
-imagesc(squeeze(im));
+imagesc(squeeze(im(5, :, :)));

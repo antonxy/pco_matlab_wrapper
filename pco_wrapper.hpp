@@ -259,8 +259,14 @@ public:
         }
     }
 
-    /** Transfers all images from the segment and performs MIP on the fly */
-    ImageStack transfer_mip(WORD Segment) {
+    /** Transfers all images from the segment and performs MIP on the fly
+	* @param Segment - Camera memory segment to transfer from (Index starts at 1)
+	* @param start_image_index - First image to transfer (Index starts at 0)
+	* @param images_per_mip - Number of images to join in one mip
+	* @param num_mips - Number of mips to perform.
+	*        Number of images transfered will be images_per_mip * num_mips
+	*/
+    ImageStack transfer_mip(WORD Segment, int start_image_index, int images_per_mip, int num_mips) {
         int iRet;
 
         DWORD ValidImageCnt, MaxImageCnt;
@@ -307,8 +313,9 @@ public:
             }
         }
 
-        ImageStack MIP_Image(1, XResAct, YResAct);
+        ImageStack MIP_Image(num_mips, XResAct, YResAct);
         uint16_t* MIP_ImageData = MIP_Image.getDataMut();
+		memset(MIP_ImageData, 0, sizeof(uint16_t) * MIP_Image.num_images * MIP_Image.rows * MIP_Image.cols);
 
         //Read from camera ram
         iRet = PCO_SetImageParameters(cam, XResAct, YResAct, IMAGEPARAMETERS_READ_FROM_SEGMENTS, NULL, 0);
@@ -329,11 +336,14 @@ public:
         QueryPerformanceFrequency(&frequency);
         QueryPerformanceCounter(&start);
 
+		int num_images_to_transfer = min(ValidImageCnt-start_image_index, num_mips * images_per_mip);
+
         //Start two image transfers
         //!! Camera indexes start at 1
-        for (int currentImageIdx = 1; currentImageIdx <= ValidImageCnt && currentImageIdx <= NUMBUF; ++currentImageIdx) {
-            //printf("Start transfer %d @ buf %d\n", currentImageIdx, currentImageIdx - 1);
-            iRet = PCO_AddBufferEx(cam, currentImageIdx, currentImageIdx, BufNum[currentImageIdx - 1], XResAct, YResAct, 16);
+        for (int currentImageIdx = 1; currentImageIdx <= num_images_to_transfer && currentImageIdx <= NUMBUF; ++currentImageIdx) {
+            printf("Start transfer %d @ buf %d\n", currentImageIdx, currentImageIdx - 1);
+			int camera_image_index = currentImageIdx + start_image_index;
+            iRet = PCO_AddBufferEx(cam, camera_image_index, camera_image_index, BufNum[currentImageIdx - 1], XResAct, YResAct, 16);
             if (iRet != PCO_NOERROR) {
                 printf("Failed to start transfer, img idx %d, buf idx %d\n", currentImageIdx, currentImageIdx - 1);
                 throw std::exception("Failed to start image transfer");
@@ -341,9 +351,10 @@ public:
         }
 
         int currentBufferIdx = 0;
-        for (int currentImageIdx = 1; currentImageIdx <= ValidImageCnt; ++currentImageIdx) {
+        for (int currentImageIdx = 1; currentImageIdx <= num_images_to_transfer; ++currentImageIdx) {
+			int camera_image_index = currentImageIdx + start_image_index;
             //wait for image transfer
-            //printf("wait for transfer %d @ buf %d\n", currentImageIdx, currentBufferIdx);
+            printf("wait for transfer %d @ buf %d\n", currentImageIdx, currentBufferIdx);
             DWORD waitstat = WaitForSingleObject(BufEvent[currentBufferIdx], INFINITE);
             if (waitstat == WAIT_OBJECT_0)
             {
@@ -365,23 +376,25 @@ public:
                 throw std::exception("Wait for buffer failed");
             }
 
-            //printf("received transfer %d\n", currentImageIdx);
+            printf("received transfer %d\n", currentImageIdx);
 
             //fold image into MIP
+			int current_mip = (currentImageIdx - 1) / images_per_mip;
+			printf("MIP image %d into MIP %d\n", currentImageIdx, current_mip);
             for (int pix = 0; pix < numPix; ++pix) {
                 WORD val = BufAdr[currentBufferIdx][pix];
-                if (val > MIP_ImageData[pix])
+                if (val > MIP_ImageData[current_mip * MIP_Image.rows * MIP_Image.cols + pix])
                 {
-                    MIP_ImageData[pix] = val;
+                    MIP_ImageData[current_mip * MIP_Image.rows * MIP_Image.cols + pix] = val;
                 }
             }
 
-            //printf("processed image %d\n", currentImageIdx);
+            printf("processed image %d\n", currentImageIdx);
 
             //start next image transfer
-            if (currentImageIdx + NUMBUF <= ValidImageCnt) {
-                //printf("start transfer %d @ buf %d\n", currentImageIdx + NUMBUF, currentBufferIdx);
-                iRet = PCO_AddBufferEx(cam, currentImageIdx + NUMBUF, currentImageIdx + NUMBUF, BufNum[currentBufferIdx], XResAct, YResAct, 16);
+            if (camera_image_index + NUMBUF <= ValidImageCnt) {
+				printf("start transfer %d @ buf %d\n", currentImageIdx + NUMBUF, currentBufferIdx);
+                iRet = PCO_AddBufferEx(cam, camera_image_index + NUMBUF, camera_image_index + NUMBUF, BufNum[currentBufferIdx], XResAct, YResAct, 16);
                 if (iRet != PCO_NOERROR) {
                     printf("Failed to start following transfer, img idx %d, buf idx %d\n", currentImageIdx, currentBufferIdx);
                     throw std::exception("Failed to start next image transfer");
@@ -393,10 +406,10 @@ public:
 
         QueryPerformanceCounter(&end);
         double interval = (double)(end.QuadPart - start.QuadPart) / frequency.QuadPart;
-        printf("Transfered %d images in %f seconds\n", ValidImageCnt, interval);
+        printf("Transfered %d images in %f seconds\n", num_images_to_transfer, interval);
         double mb_per_image = double(numPix) * 3 / 2 / 1e6;
         printf("Image size: %d x %d - %f MB\n", XResAct, YResAct, mb_per_image);
-        double mb_per_sec = mb_per_image * ValidImageCnt / interval;
+        double mb_per_sec = mb_per_image * num_images_to_transfer / interval;
         printf("Transfer speed: %f MB/s\n", mb_per_sec);
 
         //TODO properly deallocate in case of exception
