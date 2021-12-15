@@ -23,11 +23,6 @@
 #include "SC2_CamExport.h"
 #include "SC2_Defs.h"
 
-
-int doSomething(int theint) {
-    return 0;
-}
-
 /** Opens the windows console window for MATLAB so that stdout and stderr can be displayed */
 void openConsole() {
     AllocConsole();
@@ -141,9 +136,11 @@ public:
                 throw PCOError(iRet);
             }
         }
-
+    }
+    
+    void reset_camera_settings() {
         //set camera to default state
-        iRet = PCO_ResetSettingsToDefault(cam);
+        int iRet = PCO_ResetSettingsToDefault(cam);
         if (iRet != PCO_NOERROR)
         {
             throw PCOError(iRet);
@@ -161,6 +158,14 @@ public:
     void set_framerate_exposure(WORD frameRateMode, DWORD frameRate_mHz, DWORD expTime_ns) {
         WORD frameRateStatus;
         int iRet = PCO_SetFrameRate(cam, &frameRateStatus, frameRateMode, &frameRate_mHz, &expTime_ns);
+        if (iRet != PCO_NOERROR)
+        {
+            throw PCOError(iRet);
+        }
+    }
+    
+    void set_roi(WORD roiX0, WORD roiY0, WORD roiX1, WORD roiY1) {
+        int iRet = PCO_SetROI(cam, roiX0, roiY0, roiX1, roiY1);
         if (iRet != PCO_NOERROR)
         {
             throw PCOError(iRet);
@@ -230,7 +235,7 @@ public:
         }
     }
 
-    void clear_active_segment(WORD segment) {
+    void clear_active_segment() {
         int iRet = PCO_ClearRamSegment(cam);
         if (iRet != PCO_NOERROR)
         {
@@ -406,7 +411,7 @@ public:
     }
 
     void close() {
-        int iRet = PCO_CloseCamera(&cam);
+        int iRet = PCO_CloseCamera(cam);
         if (iRet != PCO_NOERROR)
         {
             throw PCOError(iRet);
