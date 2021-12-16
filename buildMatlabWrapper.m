@@ -19,8 +19,7 @@ clibgen.generateLibraryDefinition(...
 % when I change something in the c++ file.
 thedefine = definepco_wrapper;
 
-% TODO Would be more robust not to do this by index
-ImageStackDefinition = thedefine.Classes(2);
+ImageStackDefinition = find_class(thedefine.Classes, "ImageStack");
 
 getDataDefinition = addMethod(ImageStackDefinition, ...
    "uint16_t const * ImageStack::getData(int num_images,int cols,int rows)", ...
@@ -31,8 +30,7 @@ defineArgument(getDataDefinition, "rows", "int32");
 defineOutput(getDataDefinition, "RetVal", "uint16", ["num_images", "cols", "rows"]);
 validate(getDataDefinition);
 
-% TODO Would be more robust not to do this by index
-% PCOCameraDefinition = thedefine.Classes(4);
+% PCOCameraDefinition = find_class(thedefine.Classes, "PCOCamera");
 % 
 % % This is not necessary in matlab 2020
 % set_segment_sizesDefinition = addMethod(PCOCameraDefinition, ...
@@ -51,3 +49,12 @@ disp("Added to definition")
 % Maybe mingw also works?
 build(thedefine);
 
+
+%%
+function c = find_class(classes, name) 
+    for i=1:size(classes)
+        if classes(i).CPPName == name
+            c = classes(i);
+        end
+    end
+end

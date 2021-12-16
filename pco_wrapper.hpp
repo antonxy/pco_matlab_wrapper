@@ -15,6 +15,7 @@
 #include <iostream>
 #include <memory>
 #include <array>
+#include <functional>
 
 #include "pco_err.h"
 #include "sc2_SDKStructures.h"
@@ -283,14 +284,45 @@ public:
         PCOCheck(PCO_SetRecordingState(cam, 0));
     }
 
-    /** Transfers all images from the segment and performs MIP on the fly
+    /** Transfers images from the segment and performs MIP on the fly
+    * @param Segment - Camera memory segment to transfer from (Index starts at 1)
+    * @param start_image_index - First image to transfer (Index starts at 1)
+    * @param images_per_mip - Number of images to join in one mip
+    * @param num_mips - Number of mips to perform.
+    *        Number of images transfered will be images_per_mip * num_mips.
+    *        If less images than requested are on the camera the remaining images will be zero.
+    */
+    ImageStack transfer_mip(WORD Segment, unsigned int start_image_index, unsigned int images_per_mip, unsigned int num_mips) {
+        ImageStack MIP_Image(0, 0, 0);
+        transfer(Segment, start_image_index, images_per_mip * num_mips, [&MIP_Image, num_mips, images_per_mip](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+            if (MIP_Image.num_images == 0) {
+                // Allocate image after we receive first one because then we know the image size
+                MIP_Image = ImageStack(num_mips, buffer.xres, buffer.yres);
+                MIP_Image.set(0);
+            }
+
+            //fold image into MIP
+            int current_mip = transfer_image_index / images_per_mip;
+            int numPix = buffer.xres * buffer.yres;
+            for (int pix = 0; pix < numPix; ++pix) {
+                uint16_t val = buffer.addr[pix];
+                uint16_t* mip_val = MIP_Image.getDataMut() + (current_mip * MIP_Image.rows * MIP_Image.cols + pix);
+                if (val > *mip_val)
+                {
+                    *mip_val = val;
+                }
+            }
+        });
+
+        return MIP_Image;
+    }
+
+    /** Transfers images from the segment and performs operation given as callback
 	* @param Segment - Camera memory segment to transfer from (Index starts at 1)
 	* @param start_image_index - First image to transfer (Index starts at 1)
-	* @param images_per_mip - Number of images to join in one mip
-	* @param num_mips - Number of mips to perform.
-	*        Number of images transfered will be images_per_mip * num_mips
+	* @param max_images - Number of images to transfer at most (fewer will be transfered if there are fewer in the segment)
 	*/
-    ImageStack transfer_mip(WORD Segment, unsigned int start_image_index, unsigned int images_per_mip, unsigned int num_mips) {
+    void transfer(WORD Segment, unsigned int start_image_index, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer &)> image_callback) {
         if (start_image_index <= 0) {
             throw std::exception("start_image_index has to be > 0");
         }
@@ -302,17 +334,12 @@ public:
         WORD RoiX0, RoiY0, RoiX1, RoiY1;
         PCOCheck(PCO_GetSegmentImageSettings(cam, Segment, &XResAct, &YResAct,
             &XBin, &YBin, &RoiX0, &RoiY0, &RoiX1, &RoiY1));
-        int numPix = XResAct * YResAct;
 
         //TODO check if this works correctly, i.e. allocates two buffers
         //Number of buffers that will be used for transfering images in parallel
         //It seems there is no advantage to using more than 2
         constexpr int NUMBUF = 2;
         std::array<PCOBuffer, NUMBUF> pco_buffers = { PCOBuffer(cam, XResAct, YResAct), PCOBuffer(cam, XResAct, YResAct) };
-
-        ImageStack MIP_Image(num_mips, XResAct, YResAct);
-        MIP_Image.set(0);
-        uint16_t* MIP_ImageData = MIP_Image.getDataMut();
 
         //Read from camera ram
         PCOCheck(PCO_SetImageParameters(cam, XResAct, YResAct, IMAGEPARAMETERS_READ_FROM_SEGMENTS, NULL, 0));
@@ -329,7 +356,7 @@ public:
         QueryPerformanceFrequency(&frequency);
         QueryPerformanceCounter(&start);
         
-        int num_images_to_transfer = min(ValidImageCnt - (start_image_index - 1), num_mips * images_per_mip);
+        int num_images_to_transfer = min(ValidImageCnt - (start_image_index - 1), max_images);
 
         // Cancel all image transfers when exiting from this function so that nothing is
         // transfered into freed buffers
@@ -353,17 +380,7 @@ public:
             printf("wait for transfer %d @ buf %d\n", transfer_image_index, currentBufferIdx);
             pco_buffers[currentBufferIdx].wait_for_buffer();
 
-            //fold image into MIP
-			int current_mip = transfer_image_index / images_per_mip;
-			printf("MIP image %d into MIP %d\n", transfer_image_index, current_mip);
-            for (int pix = 0; pix < numPix; ++pix) {
-                uint16_t val = pco_buffers[currentBufferIdx].addr[pix];
-                if (val > MIP_ImageData[current_mip * MIP_Image.rows * MIP_Image.cols + pix])
-                {
-                    MIP_ImageData[current_mip * MIP_Image.rows * MIP_Image.cols + pix] = val;
-                }
-            }
-
+            image_callback(transfer_image_index, pco_buffers[currentBufferIdx]);
             printf("processed image %d\n", transfer_image_index);
 
             //start next image transfer
@@ -378,12 +395,10 @@ public:
         QueryPerformanceCounter(&end);
         double interval = (double)(end.QuadPart - start.QuadPart) / frequency.QuadPart;
         printf("Transfered %d images in %f seconds\n", num_images_to_transfer, interval);
-        double mb_per_image = double(numPix) * 3 / 2 / 1e6;
+        double mb_per_image = double(XResAct * YResAct) * 3 / 2 / 1e6;
         printf("Image size: %d x %d - %f MB\n", XResAct, YResAct, mb_per_image);
         double mb_per_sec = mb_per_image * num_images_to_transfer / interval;
         printf("Transfer speed: %f MB/s\n", mb_per_sec);
-
-        return MIP_Image;
     }
 
     void close() {
