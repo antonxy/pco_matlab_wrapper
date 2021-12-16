@@ -227,6 +227,20 @@ public:
         PCOCheck(PCO_SetROI(cam, roiX0, roiY0, roiX1, roiY1));
     }
 
+    void set_segment_sizes(DWORD pagesPerSegment[4]) {
+        //TODO need function to get page size
+        //TODO Check PCO_SetStorageMode - maybe allows transfer while recording
+        PCOCheck(PCO_SetCameraRamSegmentSize(cam, pagesPerSegment));
+    }
+
+    void set_active_segment(WORD segment) {
+        PCOCheck(PCO_SetActiveRamSegment(cam, segment));
+    }
+
+    void clear_active_segment() {
+        PCOCheck(PCO_ClearRamSegment(cam));
+    }
+
     /** Validates the configuration of the camera and sets the camera ready for recording */
     void arm_camera() {
         //Arm camera - this makes sure any previous configuration changes are applied
@@ -262,20 +276,6 @@ public:
         }
     }
 
-    void set_segment_sizes(DWORD pagesPerSegment[4]) {
-        //TODO Check PCO_SetStorageMode - maybe allows transfer while recording
-        PCOCheck(PCO_SetCameraRamSegmentSize(cam, pagesPerSegment));
-
-    }
-
-    void set_active_segment(WORD segment) {
-        PCOCheck(PCO_SetActiveRamSegment(cam, segment));
-    }
-
-    void clear_active_segment() {
-        PCOCheck(PCO_ClearRamSegment(cam));
-    }
-
     void start_recording() {
         PCOCheck(PCO_SetRecordingState(cam, 1));
     }
@@ -284,25 +284,48 @@ public:
         PCOCheck(PCO_SetRecordingState(cam, 0));
     }
 
+    /** Transfers images from the segment
+    * @param Segment - Camera memory segment to transfer from (Index starts at 1)
+    * @param start_image_index - First image to transfer (Index starts at 1)
+    * @param max_images - Number of images to transfer at most (fewer will be transfered if there are fewer in the segment)
+    */
+    ImageStack transfer(WORD Segment, unsigned int start_image_index, unsigned int max_images) {
+        ImageStack Images(0, 0, 0);
+        int image_index = 0;
+        transfer(Segment, start_image_index, max_images, [&Images](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+            if (transfer_image_index == 0) {
+                // Allocate image after we receive first one because then we know the image size
+                Images = ImageStack(max_images, buffer.xres, buffer.yres);
+            }
+
+            image_index = transfer_image_index;
+            memcpy(Images.getDataMut() + image_index * Images.rows * Images.cols, buffer.addr, buffer.xres * buffer.yres);
+        });
+
+        Images.num_images = image_index;
+
+        return Images;
+    }
+
     /** Transfers images from the segment and performs MIP on the fly
     * @param Segment - Camera memory segment to transfer from (Index starts at 1)
     * @param start_image_index - First image to transfer (Index starts at 1)
     * @param images_per_mip - Number of images to join in one mip
     * @param num_mips - Number of mips to perform.
     *        Number of images transfered will be images_per_mip * num_mips.
-    *        If less images than requested are on the camera the remaining images will be zero.
     */
     ImageStack transfer_mip(WORD Segment, unsigned int start_image_index, unsigned int images_per_mip, unsigned int num_mips) {
         ImageStack MIP_Image(0, 0, 0);
-        transfer(Segment, start_image_index, images_per_mip * num_mips, [&MIP_Image, num_mips, images_per_mip](unsigned int transfer_image_index, const PCOBuffer& buffer) {
-            if (MIP_Image.num_images == 0) {
+        int current_mip = 0;
+        transfer_internal(Segment, start_image_index, images_per_mip * num_mips, [&MIP_Image, num_mips, images_per_mip, &current_mip](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+            if (transfer_image_index == 0) {
                 // Allocate image after we receive first one because then we know the image size
                 MIP_Image = ImageStack(num_mips, buffer.xres, buffer.yres);
                 MIP_Image.set(0);
             }
 
-            //fold image into MIP
-            int current_mip = transfer_image_index / images_per_mip;
+            // fold image into MIP
+            current_mip = transfer_image_index / images_per_mip;
             int numPix = buffer.xres * buffer.yres;
             for (int pix = 0; pix < numPix; ++pix) {
                 uint16_t val = buffer.addr[pix];
@@ -314,6 +337,12 @@ public:
             }
         });
 
+        // Set image number to number of mips actually received
+        // This should only decrease number of images
+        // Images are not copied so additional memory is not released here
+        // But only when the ImageStack object is released
+        MIP_Image.num_images = current_mip;
+
         return MIP_Image;
     }
 
@@ -322,7 +351,7 @@ public:
 	* @param start_image_index - First image to transfer (Index starts at 1)
 	* @param max_images - Number of images to transfer at most (fewer will be transfered if there are fewer in the segment)
 	*/
-    void transfer(WORD Segment, unsigned int start_image_index, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer &)> image_callback) {
+    void transfer_internal(WORD Segment, unsigned int start_image_index, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer &)> image_callback) {
         if (start_image_index <= 0) {
             throw std::exception("start_image_index has to be > 0");
         }
@@ -366,7 +395,7 @@ public:
 
         // Start two image transfers
         for (int transfer_image_index = 0; transfer_image_index < num_images_to_transfer && transfer_image_index < NUMBUF; ++transfer_image_index) {
-            printf("Start transfer %d @ buf %d\n", transfer_image_index, transfer_image_index);
+            //printf("Start transfer %d @ buf %d\n", transfer_image_index, transfer_image_index);
 			int camera_image_index = transfer_image_index + start_image_index;
             pco_buffers[transfer_image_index].start_transfer(camera_image_index);
         }
@@ -376,16 +405,16 @@ public:
         for (int transfer_image_index = 0; transfer_image_index <= num_images_to_transfer; ++transfer_image_index) {
 			int camera_image_index = transfer_image_index + start_image_index;
             
-            //wait for image transfer
-            printf("wait for transfer %d @ buf %d\n", transfer_image_index, currentBufferIdx);
+            // wait for image transfer
+            //printf("wait for transfer %d @ buf %d\n", transfer_image_index, currentBufferIdx);
             pco_buffers[currentBufferIdx].wait_for_buffer();
 
             image_callback(transfer_image_index, pco_buffers[currentBufferIdx]);
-            printf("processed image %d\n", transfer_image_index);
+            //printf("processed image %d\n", transfer_image_index);
 
-            //start next image transfer
+            // start next image transfer
             if (transfer_image_index + NUMBUF <= num_images_to_transfer) {
-				printf("start transfer %d @ buf %d\n", transfer_image_index + NUMBUF, currentBufferIdx);
+				//printf("start transfer %d @ buf %d\n", transfer_image_index + NUMBUF, currentBufferIdx);
                 pco_buffers[currentBufferIdx].start_transfer(camera_image_index + NUMBUF);
             }
 
