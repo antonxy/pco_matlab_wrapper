@@ -1,5 +1,6 @@
 %% Using the wrapper:
-setenv('PATH',[getenv('PATH') ';C:\Program Files (x86)\PCO Digital Camera Toolbox\pco.sdk\bin64']);
+sdk_path = "C:\Program Files (x86)\PCO Digital Camera Toolbox\pco.sdk\";
+setenv('PATH',strcat(getenv('PATH'), ";", fullfile(sdk_path, "bin64")));
 addpath pco_wrapper;
 
 %% 
