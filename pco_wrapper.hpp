@@ -9,7 +9,10 @@
 // Comilation fails with "utility:137: expected an identifier"... without this
 #define _HAS_CONDITIONAL_EXPLICIT 0
 
-#include <exception>
+//Otherwise min macro defined by windows.h messes up std::min
+#define NOMINMAX
+
+#include <stdexcept>
 #include <windows.h>
 #include <cstdio>
 #include <iostream>
@@ -52,7 +55,7 @@ public:
         So you have to take the size from the Image properties and pass it in here */
     const uint16_t* getData(int num_images, int cols, int rows) {
         if (num_images != this->num_images || cols != this->cols || rows != this->rows) {
-            throw std::exception("Dimensions passed in do not match image dimensions");
+            throw std::runtime_error("Dimensions passed in do not match image dimensions");
         }
         return data.get();
     }
@@ -172,19 +175,21 @@ struct PCOBuffer {
             if (StatusDrv != PCO_NOERROR)
             {
 				printf("buf error status 0x%08x\n", StatusDrv);
-                throw std::exception("Buffer error status");
+                throw std::runtime_error("Buffer error status");
             }
         }
         else
         {
-            throw std::exception("Wait for buffer failed");
+            throw std::runtime_error("Wait for buffer failed");
         }
     }
 };
 
 class PCOCamera {
 public:
-    PCOCamera() { }
+    PCOCamera()
+		: cam(nullptr)
+	{ }
 
     /** Connects to the camera */
     void open(WORD wCamNum) {
@@ -196,7 +201,7 @@ public:
         PCOCheck(PCO_GetCameraDescription(cam, &strDescription));
         if (strDescription.dwGeneralCapsDESC1 & GENERALCAPS1_NO_RECORDER)
         {
-            throw std::exception("Camera found, but it has no internal memory\n");
+            throw std::runtime_error("Camera found, but it has no internal memory\n");
         }
 
         WORD RecordingState;
@@ -259,7 +264,7 @@ public:
         if (CameraError != 0)
         {
             printf("Camera error set: 0x%08x\n", CameraError);
-            throw std::exception("Camera error set\n");
+            throw std::runtime_error("Camera error set\n");
         }
     }
 
@@ -358,7 +363,7 @@ public:
 	*/
     void transfer_internal(WORD Segment, unsigned int start_image_index, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer &)> image_callback) {
         if (start_image_index <= 0) {
-            throw std::exception("start_image_index has to be > 0");
+            throw std::runtime_error("start_image_index has to be > 0");
         }
         DWORD ValidImageCnt, MaxImageCnt;
         PCOCheck(PCO_GetNumberOfImagesInSegment(cam, Segment, &ValidImageCnt, &MaxImageCnt));
@@ -390,7 +395,7 @@ public:
         QueryPerformanceFrequency(&frequency);
         QueryPerformanceCounter(&start);
         
-        int num_images_to_transfer = min(ValidImageCnt - (start_image_index - 1), max_images);
+        int num_images_to_transfer = std::min(int(ValidImageCnt - (start_image_index - 1)), int(max_images));
 
         // Cancel all image transfers when exiting from this function so that nothing is
         // transfered into freed buffers
@@ -429,7 +434,7 @@ public:
         QueryPerformanceCounter(&end);
         double interval = (double)(end.QuadPart - start.QuadPart) / frequency.QuadPart;
         printf("Transfered %d images in %f seconds\n", num_images_to_transfer, interval);
-        double mb_per_image = double(XResAct * YResAct) * 3 / 2 / 1e6;
+        double mb_per_image = double(XResAct) * double(YResAct) * 3 / 2 / 1e6;
         printf("Image size: %d x %d - %f MB\n", XResAct, YResAct, mb_per_image);
         double mb_per_sec = mb_per_image * num_images_to_transfer / interval;
         printf("Transfer speed: %f MB/s\n", mb_per_sec);
