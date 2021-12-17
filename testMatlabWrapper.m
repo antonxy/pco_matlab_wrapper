@@ -32,7 +32,7 @@ c.stop_recording();
 
 %%
 image = c.transfer_mip(1, 1, 100, 10);
-
+all_images = c.transfer(1, 1, 1000);
 %%
 c.close()
 
@@ -41,6 +41,14 @@ c.close()
 % you have to pass it's size to the getData function.
 % This is a workaround for a limitation in the matlab c++ interface.
 % I think there is no other way.
+
+% This is also really slow. I don't know why. I think it should be at most
+% a memcpy that matlab is doing here. But it's much slower than memcpy
+% it would be nice if we don't have to copy the data here also and it
+% can just stay in the buffer that was allocated by the library
+% Alternatively let the library save the images directly
+% Might anyway be convenient
 im = image.getData(image.num_images, image.cols, image.rows);
+im_all = all_images.getData(all_images.num_images, all_images.cols, all_images.rows);
 figure;
-imagesc(squeeze(im(5, :, :)));
+imagesc(squeeze(im(10, :, :)));

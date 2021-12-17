@@ -23,6 +23,10 @@
 #include "SC2_CamExport.h"
 #include "SC2_Defs.h"
 
+//Uncomment second line to disable debug printing
+//#define DEBUG
+#define DEBUG //
+
 // Use unique_ptr as go style defer
 using defer = std::shared_ptr<void>;
 
@@ -123,7 +127,7 @@ struct PCOBuffer {
         : cam(cam), event(NULL), num(-1), addr(NULL), xres(xres), yres(yres)
     {
         DWORD bufsize = xres * yres * sizeof(uint16_t);
-        printf("Allocate buffer\n");
+		DEBUG printf("Allocate buffer\n");
         PCO_AllocateBuffer(cam, &num, bufsize, &addr, &event);
         allocated = true;
     }
@@ -146,7 +150,7 @@ struct PCOBuffer {
 
     ~PCOBuffer() {
         if (allocated) {
-            printf("Free buffer\n");
+			DEBUG printf("Free buffer\n");
             PCO_FreeBuffer(cam, num);
         }
     }
@@ -167,7 +171,7 @@ struct PCOBuffer {
             //!!! IMPORTANT StatusDrv must always be checked for errors 
             if (StatusDrv != PCO_NOERROR)
             {
-                printf("buf error status 0x%08x\n", StatusDrv);
+				printf("buf error status 0x%08x\n", StatusDrv);
                 throw std::exception("Buffer error status");
             }
         }
@@ -291,18 +295,18 @@ public:
     */
     ImageStack transfer(WORD Segment, unsigned int start_image_index, unsigned int max_images) {
         ImageStack Images(0, 0, 0);
-        int image_index = 0;
-        transfer(Segment, start_image_index, max_images, [&Images](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+        int images_transferred = 0;
+		transfer_internal(Segment, start_image_index, max_images, [&Images, &images_transferred, &max_images](unsigned int transfer_image_index, const PCOBuffer& buffer) {
             if (transfer_image_index == 0) {
                 // Allocate image after we receive first one because then we know the image size
                 Images = ImageStack(max_images, buffer.xres, buffer.yres);
             }
 
-            image_index = transfer_image_index;
-            memcpy(Images.getDataMut() + image_index * Images.rows * Images.cols, buffer.addr, buffer.xres * buffer.yres);
+            memcpy(Images.getDataMut() + transfer_image_index * Images.rows * Images.cols, buffer.addr, buffer.xres * buffer.yres);
+			images_transferred = transfer_image_index + 1;
         });
 
-        Images.num_images = image_index;
+        Images.num_images = images_transferred;
 
         return Images;
     }
@@ -316,8 +320,8 @@ public:
     */
     ImageStack transfer_mip(WORD Segment, unsigned int start_image_index, unsigned int images_per_mip, unsigned int num_mips) {
         ImageStack MIP_Image(0, 0, 0);
-        int current_mip = 0;
-        transfer_internal(Segment, start_image_index, images_per_mip * num_mips, [&MIP_Image, num_mips, images_per_mip, &current_mip](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+        int mips_transferred = 0;
+        transfer_internal(Segment, start_image_index, images_per_mip * num_mips, [&MIP_Image, num_mips, images_per_mip, &mips_transferred](unsigned int transfer_image_index, const PCOBuffer& buffer) {
             if (transfer_image_index == 0) {
                 // Allocate image after we receive first one because then we know the image size
                 MIP_Image = ImageStack(num_mips, buffer.xres, buffer.yres);
@@ -325,7 +329,7 @@ public:
             }
 
             // fold image into MIP
-            current_mip = transfer_image_index / images_per_mip;
+            int current_mip = transfer_image_index / images_per_mip;
             int numPix = buffer.xres * buffer.yres;
             for (int pix = 0; pix < numPix; ++pix) {
                 uint16_t val = buffer.addr[pix];
@@ -335,13 +339,14 @@ public:
                     *mip_val = val;
                 }
             }
+			mips_transferred = current_mip + 1;
         });
 
         // Set image number to number of mips actually received
         // This should only decrease number of images
         // Images are not copied so additional memory is not released here
         // But only when the ImageStack object is released
-        MIP_Image.num_images = current_mip;
+        MIP_Image.num_images = mips_transferred;
 
         return MIP_Image;
     }
@@ -395,26 +400,26 @@ public:
 
         // Start two image transfers
         for (int transfer_image_index = 0; transfer_image_index < num_images_to_transfer && transfer_image_index < NUMBUF; ++transfer_image_index) {
-            //printf("Start transfer %d @ buf %d\n", transfer_image_index, transfer_image_index);
+			DEBUG printf("Start transfer %d @ buf %d\n", transfer_image_index, transfer_image_index);
 			int camera_image_index = transfer_image_index + start_image_index;
             pco_buffers[transfer_image_index].start_transfer(camera_image_index);
         }
 
         // Wait for tranfers in order, when a transfer is finished use the buffer to start the next one
         int currentBufferIdx = 0;
-        for (int transfer_image_index = 0; transfer_image_index <= num_images_to_transfer; ++transfer_image_index) {
+        for (int transfer_image_index = 0; transfer_image_index < num_images_to_transfer; ++transfer_image_index) {
 			int camera_image_index = transfer_image_index + start_image_index;
             
             // wait for image transfer
-            //printf("wait for transfer %d @ buf %d\n", transfer_image_index, currentBufferIdx);
+			DEBUG printf("wait for transfer %d @ buf %d\n", transfer_image_index, currentBufferIdx);
             pco_buffers[currentBufferIdx].wait_for_buffer();
 
             image_callback(transfer_image_index, pco_buffers[currentBufferIdx]);
-            //printf("processed image %d\n", transfer_image_index);
+			DEBUG printf("processed image %d\n", transfer_image_index);
 
             // start next image transfer
-            if (transfer_image_index + NUMBUF <= num_images_to_transfer) {
-				//printf("start transfer %d @ buf %d\n", transfer_image_index + NUMBUF, currentBufferIdx);
+            if (transfer_image_index + NUMBUF < num_images_to_transfer) {
+				DEBUG printf("start transfer %d @ buf %d\n", transfer_image_index + NUMBUF, currentBufferIdx);
                 pco_buffers[currentBufferIdx].start_transfer(camera_image_index + NUMBUF);
             }
 
