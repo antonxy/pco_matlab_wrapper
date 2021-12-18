@@ -7,4 +7,4 @@ pco_dep = declare_dependency(
     link_args : ['-L' + pco_dir + 'lib64', '-l' + pco_lib],
     include_directories : include_directories(pco_dir + 'include'))
 
-executable('mip_tool', 'mip_tool.cpp', dependencies : pco_dep)
+executable('pco_transfer', 'pco_transfer.cpp', dependencies : pco_dep)

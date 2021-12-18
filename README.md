@@ -17,16 +17,16 @@ See `testMatlabWrapper.m` on how to use the library.
 
 ## Command line tool
 
-To build the standalone command line tool I use meson. You can probably also set it up in Visual Studio if thats your thing.
+To build the standalone command line tool I use meson.
 
 - Install python3 (put it on the `PATH` to run the next command easily)
 - Install meson `pip install meson`
 - Adjust path to the PCO SDK in `meson.build`
 - In code directory run
-```
-meson setup builddir
-cd builddir
-meson compile
-```
+  ```
+  meson setup builddir
+  cd builddir
+  meson compile
+  ```
 - Add `$PCO_SDK_DIR/bin64` to your `PATH`
-- Run `mip_tool.exe`
+- Run `pco_transfer.exe -h` to see available options
