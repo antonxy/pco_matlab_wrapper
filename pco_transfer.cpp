@@ -1,6 +1,7 @@
 #include <iostream>
 #include "clipp.hpp"
 #include "pco_wrapper.hpp"
+#include "tinytiffwriter.h"
 
 using namespace clipp;
 
@@ -28,6 +29,8 @@ int main(int argc, char** argv) {
 
 	//TODO allow transfer all without setting num_mips/num_images
 	//First have to implement saving to files
+
+	//TODO validate arguments, e.g. don't allow strings, negative numbers
 
 	auto mip_command = (
 		command("mip").set(selected, mode::mip) % "MIP transfer",
@@ -72,14 +75,63 @@ int main(int argc, char** argv) {
 	// Execution
 	//
 
+	
+
 	try {
 		PCOCamera cam;
 		cam.open(0);
 		if (selected == mode::mip) {
-			cam.transfer_mip(segment, skip_images + 1, images_per_mip, num_mips);
+			TinyTIFFWriterFile* tif;
+			//TODO Split image if > 4GiB
+			std::unique_ptr<uint16_t[]> MIP_buffer;
+			cam.transfer_internal(segment, skip_images + 1, images_per_mip * num_mips, [&tif, outpath, &MIP_buffer, images_per_mip](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+				int numPix = buffer.xres * buffer.yres;
+				if (transfer_image_index == 0) {
+					// Allocate image after we receive first one because then we know the image size
+					tif = TinyTIFFWriter_open(outpath.c_str(), 16, TinyTIFFWriter_UInt, 0, buffer.xres, buffer.yres, TinyTIFFWriter_Greyscale);
+					if (!tif) {
+						throw std::runtime_error("Could not create tiff file");
+					}
+
+					MIP_buffer = std::unique_ptr<uint16_t[]>(new uint16_t[numPix]);
+					memset(MIP_buffer.get(), 0, numPix * sizeof(uint16_t));
+				}
+
+				// fold image into MIP
+				for (int pix = 0; pix < numPix; ++pix) {
+					uint16_t val = buffer.addr[pix];
+					uint16_t* mip_val = MIP_buffer.get() + pix;
+					if (val > * mip_val)
+					{
+						*mip_val = val;
+					}
+				}
+
+				if (transfer_image_index % images_per_mip == images_per_mip - 1) {
+					//Save image
+					TinyTIFFWriter_writeImage(tif, buffer.addr);
+
+					//Reset MIP
+					memset(MIP_buffer.get(), 0, numPix * sizeof(uint16_t));
+				}
+			});
+			TinyTIFFWriter_close(tif);
 		}
 		else if (selected == mode::full_transfer) {
-			cam.transfer(segment, skip_images + 1, num_images);
+			TinyTIFFWriterFile* tif;
+			//TODO Split image if > 4GiB
+			cam.transfer_internal(segment, skip_images + 1, num_images, [&tif, outpath](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+				if (transfer_image_index == 0) {
+					// Allocate image after we receive first one because then we know the image size
+					tif = TinyTIFFWriter_open(outpath.c_str(), 16, TinyTIFFWriter_UInt, 0, buffer.xres, buffer.yres, TinyTIFFWriter_Greyscale);
+					if (!tif) {
+						throw std::runtime_error("Could not create tiff file");
+					}
+				}
+
+				TinyTIFFWriter_writeImage(tif, buffer.addr);
+			});
+			TinyTIFFWriter_close(tif);
 		}
 		cam.close();
 		return 0;

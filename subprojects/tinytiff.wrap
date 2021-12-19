@@ -1,0 +1,9 @@
+[wrap-file]
+directory = TinyTIFF-3.0.0.0
+source_url = https://github.com/jkriege2/TinyTIFF/archive/refs/tags/3.0.0.0.tar.gz
+source_filename = 3.0.0.0.tar.gz
+source_hash = 36b623d97223183ad7f21768210a50332ddf3d185f4845b3f5cc0b815b624eae
+patch_directory = tinytiff_patch
+
+[provide]
+dependency_names = tinytiff_dep

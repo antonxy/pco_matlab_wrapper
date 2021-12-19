@@ -1,0 +1,1 @@
+#define TINYTIFF_EXPORT

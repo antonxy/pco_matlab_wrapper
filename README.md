@@ -28,5 +28,5 @@ To build the standalone command line tool I use meson.
   cd builddir
   meson compile
   ```
-- Add `$PCO_SDK_DIR/bin64` to your `PATH`
+- Add `$PCO_SDK_DIR/bin64` to your `PATH` or copy `SC2_Cam.dll` and related camera driver dlls to the current folder.
 - Run `pco_transfer.exe -h` to see available options
