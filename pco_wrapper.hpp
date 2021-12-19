@@ -295,13 +295,13 @@ public:
 
     /** Transfers images from the segment
     * @param Segment - Camera memory segment to transfer from (Index starts at 1)
-    * @param start_image_index - First image to transfer (Index starts at 1)
+    * @param skip_images - Number of images to skip before first image.
     * @param max_images - Number of images to transfer at most (fewer will be transfered if there are fewer in the segment)
     */
-    ImageStack transfer(WORD Segment, unsigned int start_image_index, unsigned int max_images) {
+    ImageStack transfer(WORD Segment, unsigned int skip_images, unsigned int max_images) {
         ImageStack Images(0, 0, 0);
         int images_transferred = 0;
-		transfer_internal(Segment, start_image_index, max_images, [&Images, &images_transferred, &max_images](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+		transfer_internal(Segment, skip_images, max_images, [&Images, &images_transferred, &max_images](unsigned int transfer_image_index, const PCOBuffer& buffer) {
             if (transfer_image_index == 0) {
                 // Allocate image after we receive first one because then we know the image size
                 Images = ImageStack(max_images, buffer.xres, buffer.yres);
@@ -318,15 +318,15 @@ public:
 
     /** Transfers images from the segment and performs MIP on the fly
     * @param Segment - Camera memory segment to transfer from (Index starts at 1)
-    * @param start_image_index - First image to transfer (Index starts at 1)
+    * @param skip_images - Number of images to skip before first image.
     * @param images_per_mip - Number of images to join in one mip
     * @param num_mips - Number of mips to perform.
     *        Number of images transfered will be images_per_mip * num_mips.
     */
-    ImageStack transfer_mip(WORD Segment, unsigned int start_image_index, unsigned int images_per_mip, unsigned int num_mips) {
+    ImageStack transfer_mip(WORD Segment, unsigned int skip_images, unsigned int images_per_mip, unsigned int num_mips) {
         ImageStack MIP_Image(0, 0, 0);
         int mips_transferred = 0;
-        transfer_internal(Segment, start_image_index, images_per_mip * num_mips, [&MIP_Image, num_mips, images_per_mip, &mips_transferred](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+        transfer_internal(Segment, skip_images, images_per_mip * num_mips, [&MIP_Image, num_mips, images_per_mip, &mips_transferred](unsigned int transfer_image_index, const PCOBuffer& buffer) {
             if (transfer_image_index == 0) {
                 // Allocate image after we receive first one because then we know the image size
                 MIP_Image = ImageStack(num_mips, buffer.xres, buffer.yres);
@@ -358,15 +358,17 @@ public:
 
     /** Transfers images from the segment and performs operation given as callback
 	* @param Segment - Camera memory segment to transfer from (Index starts at 1)
-	* @param start_image_index - First image to transfer (Index starts at 1)
-	* @param max_images - Number of images to transfer at most (fewer will be transfered if there are fewer in the segment)
+	* @param skip_images - Number of images to skip before first image.
+	* @param max_images - Number of images to transfer at most (fewer will be transfered if there are fewer in the segment).
+             Set to maximum int value to transfer all images.
 	*/
-    void transfer_internal(WORD Segment, unsigned int start_image_index, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer &)> image_callback) {
-        if (start_image_index <= 0) {
-            throw std::runtime_error("start_image_index has to be > 0");
-        }
+    void transfer_internal(WORD Segment, unsigned int skip_images, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer &)> image_callback) {
         DWORD ValidImageCnt, MaxImageCnt;
         PCOCheck(PCO_GetNumberOfImagesInSegment(cam, Segment, &ValidImageCnt, &MaxImageCnt));
+
+        if (skip_images >= ValidImageCnt) {
+            return;
+        }
 
         //Get image size and settings from camera
         WORD XResAct, YResAct, XBin, YBin;
@@ -395,7 +397,7 @@ public:
         QueryPerformanceFrequency(&frequency);
         QueryPerformanceCounter(&start);
         
-        int num_images_to_transfer = std::min(int(ValidImageCnt - (start_image_index - 1)), int(max_images));
+        unsigned int num_images_to_transfer = std::min(((unsigned int)ValidImageCnt) - skip_images, max_images);
 
         // Cancel all image transfers when exiting from this function so that nothing is
         // transfered into freed buffers
@@ -406,14 +408,14 @@ public:
         // Start two image transfers
         for (int transfer_image_index = 0; transfer_image_index < num_images_to_transfer && transfer_image_index < NUMBUF; ++transfer_image_index) {
 			DEBUG printf("Start transfer %d @ buf %d\n", transfer_image_index, transfer_image_index);
-			int camera_image_index = transfer_image_index + start_image_index;
+			int camera_image_index = transfer_image_index + skip_images + 1;
             pco_buffers[transfer_image_index].start_transfer(camera_image_index);
         }
 
         // Wait for tranfers in order, when a transfer is finished use the buffer to start the next one
         int currentBufferIdx = 0;
         for (int transfer_image_index = 0; transfer_image_index < num_images_to_transfer; ++transfer_image_index) {
-			int camera_image_index = transfer_image_index + start_image_index;
+			int camera_image_index = transfer_image_index + skip_images + 1;
             
             // wait for image transfer
 			DEBUG printf("wait for transfer %d @ buf %d\n", transfer_image_index, currentBufferIdx);
