@@ -1,8 +1,6 @@
 # pco_matlab_wrapper
 
-**This is quite unfinished, documentation may refer to a (hopefully) future state**
-
-This repo contains a library to control and read images from pco cameras and perform MIP on the fly.
+This repo contains a library to control and read images from pco cameras and perform maximum intensity projection (MIP) on the fly.
 This library can be called from MATLAB.
 
 It also contains a standalone command line tool to save MIPs as tiff files.
@@ -30,3 +28,7 @@ To build the standalone command line tool I use meson.
   ```
 - Add `$PCO_SDK_DIR/bin64` to your `PATH` or copy `SC2_Cam.dll` and related camera driver dlls to the current folder.
 - Run `pco_transfer.exe -h` to see available options
+
+### Issues
+- **Currently tiff files bigger than 4GiB can be written but will lead to a corrupt file**
+- It's possible to crash the application in a few ways. E.g. transferring 0 images.

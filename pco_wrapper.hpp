@@ -27,8 +27,8 @@
 #include "SC2_Defs.h"
 
 //Uncomment second line to disable debug printing
-//#define DEBUG
-#define DEBUG //
+//#define DEBUGPRINT
+#define DEBUGPRINT / ## /
 
 // Use unique_ptr as go style defer
 using defer = std::shared_ptr<void>;
@@ -130,7 +130,7 @@ struct PCOBuffer {
         : cam(cam), event(NULL), num(-1), addr(NULL), xres(xres), yres(yres)
     {
         DWORD bufsize = xres * yres * sizeof(uint16_t);
-		DEBUG printf("Allocate buffer\n");
+		DEBUGPRINT printf("Allocate buffer\n");
         PCO_AllocateBuffer(cam, &num, bufsize, &addr, &event);
         allocated = true;
     }
@@ -153,7 +153,7 @@ struct PCOBuffer {
 
     ~PCOBuffer() {
         if (allocated) {
-			DEBUG printf("Free buffer\n");
+			DEBUGPRINT printf("Free buffer\n");
             PCO_FreeBuffer(cam, num);
         }
     }
@@ -385,7 +385,7 @@ public:
         //Read from camera ram
         PCOCheck(PCO_SetImageParameters(cam, XResAct, YResAct, IMAGEPARAMETERS_READ_FROM_SEGMENTS, NULL, 0));
 
-        printf("Grab recorded images from camera actual valid %d\n", ValidImageCnt);
+		DEBUGPRINT printf("Grab recorded images from camera actual valid %d\n", ValidImageCnt);
 
         //Use two buffers. Start two transfers in the beginning.
         //Wait for the first one to finish, process the data, then start it again for the next image and switch the buffers.
@@ -407,7 +407,7 @@ public:
 
         // Start two image transfers
         for (int transfer_image_index = 0; transfer_image_index < num_images_to_transfer && transfer_image_index < NUMBUF; ++transfer_image_index) {
-			DEBUG printf("Start transfer %d @ buf %d\n", transfer_image_index, transfer_image_index);
+			DEBUGPRINT printf("Start transfer %d @ buf %d\n", transfer_image_index, transfer_image_index);
 			int camera_image_index = transfer_image_index + skip_images + 1;
             pco_buffers[transfer_image_index].start_transfer(camera_image_index);
         }
@@ -418,15 +418,15 @@ public:
 			int camera_image_index = transfer_image_index + skip_images + 1;
             
             // wait for image transfer
-			DEBUG printf("wait for transfer %d @ buf %d\n", transfer_image_index, currentBufferIdx);
+			DEBUGPRINT printf("wait for transfer %d @ buf %d\n", transfer_image_index, currentBufferIdx);
             pco_buffers[currentBufferIdx].wait_for_buffer();
 
             image_callback(transfer_image_index, pco_buffers[currentBufferIdx]);
-			DEBUG printf("processed image %d\n", transfer_image_index);
+			DEBUGPRINT printf("processed image %d\n", transfer_image_index);
 
             // start next image transfer
             if (transfer_image_index + NUMBUF < num_images_to_transfer) {
-				DEBUG printf("start transfer %d @ buf %d\n", transfer_image_index + NUMBUF, currentBufferIdx);
+				DEBUGPRINT printf("start transfer %d @ buf %d\n", transfer_image_index + NUMBUF, currentBufferIdx);
                 pco_buffers[currentBufferIdx].start_transfer(camera_image_index + NUMBUF);
             }
 
@@ -435,11 +435,11 @@ public:
 
         QueryPerformanceCounter(&end);
         double interval = (double)(end.QuadPart - start.QuadPart) / frequency.QuadPart;
-        printf("Transfered %d images in %f seconds\n", num_images_to_transfer, interval);
+		DEBUGPRINT printf("Transfered %d images in %f seconds\n", num_images_to_transfer, interval);
         double mb_per_image = double(XResAct) * double(YResAct) * 3 / 2 / 1e6;
-        printf("Image size: %d x %d - %f MB\n", XResAct, YResAct, mb_per_image);
+		DEBUGPRINT printf("Image size: %d x %d - %f MB\n", XResAct, YResAct, mb_per_image);
         double mb_per_sec = mb_per_image * num_images_to_transfer / interval;
-        printf("Transfer speed: %f MB/s\n", mb_per_sec);
+		DEBUGPRINT printf("Transfer speed: %f MB/s\n", mb_per_sec);
     }
 
     void close() {

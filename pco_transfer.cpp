@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
 	mode selected = mode::none;
 
 	//MIP mode
-	unsigned int num_mips = 0;
+	unsigned int num_mips = std::numeric_limits<unsigned int>::max();
 	unsigned int images_per_mip = 0;
 
 	//Full transfer
@@ -27,22 +27,20 @@ int main(int argc, char** argv) {
 	std::string outpath = "";
 	int segment = 1;
 
-	//TODO validate arguments, e.g. don't allow strings, negative numbers
-
 	auto mip_command = (
 		command("mip").set(selected, mode::mip) % "MIP transfer",
-		required("-i", "--images_per_mip") & value("images per mip", images_per_mip) % "Number of images in each MIP. num_mips * images_per_mip will be transferred.",
-		option("-m", "--num_mips")& value("num mips", num_mips) % "Number of MIPs to transfer"
+		required("-i", "--images_per_mip") & integer("images per mip", images_per_mip) % "Number of images in each MIP. num_mips * images_per_mip will be transferred.",
+		option("-m", "--num_mips")& integer("num mips", num_mips) % "Number of MIPs to transfer"
 	);
 
 	auto full_transfer_command = (
 		command("full").set(selected, mode::full_transfer) % "Full Transfer",
-		option("-n", "--num_images") & value("num images", num_images) % "Number of images to transfer"
+		option("-n", "--num_images") & integer("num images", num_images) % "Number of images to transfer"
 	);
 
 	auto common_options = (
-		option("-s", "--skip_images") & value("skip images", skip_images) % "Number of images to skip before first MIP.",
-		option("--segment") & value("segment", segment) % "Camera RAM segment. Index starts at 1.",
+		option("-s", "--skip_images") & integer("skip images", skip_images) % "Number of images to skip before first MIP.",
+		option("--segment") & integer("segment", segment) % "Camera RAM segment. Index starts at 1.",
 		value("output path", outpath)
 	);
 
@@ -81,7 +79,13 @@ int main(int argc, char** argv) {
 			TinyTIFFWriterFile* tif;
 			//TODO Split image if > 4GiB
 			std::unique_ptr<uint16_t[]> MIP_buffer;
-			cam.transfer_internal(segment, skip_images, images_per_mip * num_mips, [&tif, outpath, &MIP_buffer, images_per_mip](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+			unsigned int images_to_transfer = images_per_mip * num_mips;
+			if (num_mips == std::numeric_limits<unsigned int>::max()) {
+				images_to_transfer = std::numeric_limits<unsigned int>::max();
+			}
+			unsigned int transferred_images = 0;
+			unsigned int transferred_mips = 0;
+			cam.transfer_internal(segment, skip_images, images_per_mip * num_mips, [&tif, outpath, &MIP_buffer, images_per_mip, &transferred_images, &transferred_mips](unsigned int transfer_image_index, const PCOBuffer& buffer) {
 				int numPix = buffer.xres * buffer.yres;
 				if (transfer_image_index == 0) {
 					// Allocate image after we receive first one because then we know the image size
@@ -107,17 +111,27 @@ int main(int argc, char** argv) {
 				if (transfer_image_index % images_per_mip == images_per_mip - 1) {
 					//Save image
 					TinyTIFFWriter_writeImage(tif, buffer.addr);
+					transferred_mips += 1;
 
 					//Reset MIP
 					memset(MIP_buffer.get(), 0, numPix * sizeof(uint16_t));
 				}
+				transferred_images += 1;
+				if (transferred_images % 10 == 0) std::cout << "\r" << transferred_images;
 			});
 			TinyTIFFWriter_close(tif);
+
+			std::cout << "\rTransferred " << transferred_images << " images into " << transferred_mips << " MIPs" << std::endl;
+			unsigned int lost_images = transferred_images % transferred_mips;
+			if (lost_images != 0) {
+				std::cout << "Lost " << lost_images << " images which did not fill a MIP" << std::endl;
+			}
 		}
 		else if (selected == mode::full_transfer) {
 			TinyTIFFWriterFile* tif;
 			//TODO Split image if > 4GiB
-			cam.transfer_internal(segment, skip_images, num_images, [&tif, outpath](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+			unsigned int transferred_images = 0;
+			cam.transfer_internal(segment, skip_images, num_images, [&tif, outpath, &transferred_images](unsigned int transfer_image_index, const PCOBuffer& buffer) {
 				if (transfer_image_index == 0) {
 					// Allocate image after we receive first one because then we know the image size
 					tif = TinyTIFFWriter_open(outpath.c_str(), 16, TinyTIFFWriter_UInt, 0, buffer.xres, buffer.yres, TinyTIFFWriter_Greyscale);
@@ -127,11 +141,13 @@ int main(int argc, char** argv) {
 				}
 
 				TinyTIFFWriter_writeImage(tif, buffer.addr);
+				transferred_images += 1;
+				if (transferred_images % 10 == 0) std::cout << "\r" << transferred_images;
 			});
 			TinyTIFFWriter_close(tif);
+			std::cout << "\rTransferred " << transferred_images << " images" << std::endl;
 		}
 		cam.close();
-		std::cout << "Image transfer successful" << std::endl;
 		return 0;
 	}
 	catch (const std::exception& ex) {
