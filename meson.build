@@ -1,6 +1,6 @@
 project('pco_matlab_wrapper', 'cpp')
 
-pco_dir = 'C:\\Program Files (x86)\\PCO Digital Camera Toolbox\\pco.sdk\\'
+pco_dir = 'C:\\Users\\fucko\\AppData\\Roaming\\PCO Digital Camera Toolbox\\pco.sdk\\'
 pco_lib = 'SC2_Cam'
 
 pco_dep = declare_dependency(
@@ -10,4 +10,8 @@ pco_dep = declare_dependency(
 tinytiff_proj = subproject('tinytiff')
 tinytiff_dep = tinytiff_proj.get_variable('tinytiff_dep')
 
-executable('pco_transfer', 'pco_transfer.cpp', dependencies : [pco_dep, tinytiff_dep])
+pco_wrapper_inc = include_directories('./include')
+pco_wrapper = static_library('pco_wrapper', 'src/pco_wrapper.cpp', include_directories: pco_wrapper_inc, dependencies : [pco_dep, tinytiff_dep])
+pco_wrapper_dep = declare_dependency(link_with : pco_wrapper, include_directories : pco_wrapper_inc)
+
+executable('pco_transfer', 'src/pco_transfer.cpp', dependencies : [pco_dep, tinytiff_dep, pco_wrapper_dep])

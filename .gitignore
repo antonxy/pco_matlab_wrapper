@@ -1,0 +1,6 @@
+/builddir
+/matlab/pco_wrapper
+/matlab/definepco_wrapper.m*
+/matlab/pco_wrapperData.xml
+/subprojects/packagecache
+/subprojects/TinyTIFF-3.0.0.0
