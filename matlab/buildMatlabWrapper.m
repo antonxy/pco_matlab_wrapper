@@ -1,5 +1,5 @@
 %% Build definition
-sdk_path = "C:\\Users\\fucko\\AppData\\Roaming\\PCO Digital Camera Toolbox\\pco.sdk\\";
+sdk_path = "C:\\Program Files (x86)\\PCO Digital Camera Toolbox\\pco.sdk\\";
 % Remove old definition
 delete("definepco_wrapper.m");
 delete("definepco_wrapper.mlx");

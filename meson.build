@@ -1,6 +1,6 @@
 project('pco_matlab_wrapper', 'cpp')
 
-pco_dir = 'C:\\Users\\fucko\\AppData\\Roaming\\PCO Digital Camera Toolbox\\pco.sdk\\'
+pco_dir = 'C:\\Program Files (x86)\\PCO Digital Camera Toolbox\\pco.sdk\\'
 pco_lib = 'SC2_Cam'
 
 pco_dep = declare_dependency(

@@ -1,5 +1,5 @@
 %% Using the wrapper:
-sdk_path = "C:\\Users\\fucko\\AppData\\Roaming\\PCO Digital Camera Toolbox\\pco.sdk\\";
+sdk_path = "C:\\Program Files (x86)\\PCO Digital Camera Toolbox\\pco.sdk\\";
 setenv('PATH',strcat(getenv('PATH'), ";", fullfile(sdk_path, "bin64")));
 addpath pco_wrapper;
 
