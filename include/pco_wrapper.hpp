@@ -57,49 +57,64 @@ public:
     void set_framerate_exposure(WORD frameRateMode, DWORD frameRate_mHz, DWORD expTime_ns);
     
     void set_roi(WORD roiX0, WORD roiY0, WORD roiX1, WORD roiY1);
+    
+    /** Validates the configuration of the camera and sets the camera ready for recording */
+    void arm_camera();
 
-    //TODO let this take number of images instead of pages
-    void set_segment_sizes(DWORD pagesPerSegment[4]);
+    /**
+    * Set segment sizes in number of images.
+    * Since the internal segment size depends on the size of a single image,
+    * ROI has to be set **before** setting the segment size.
+    * arm_camera has to be called **before** also to update the image resolution.
+    */
+    void set_segment_sizes(DWORD segment1, DWORD segment2, DWORD segment3, DWORD segment4);
 
     void set_active_segment(WORD segment);
 
     void clear_active_segment();
 
-    /** Validates the configuration of the camera and sets the camera ready for recording */
-    void arm_camera();
-
     void print_transferparameters();
 
+    /**
+    * From PCO SDK docs:
+    * If any camera parameter was changed: before setting the Recording State to [run], the function PCO_ArmCamera must be called.
+    * This is to ensure that all settings were correctly and are accepted by the camera.
+    * If a successful Recording State [run] command is sent and recording is started, the images from a previous record to the active segment are lost.
+    */
     void start_recording();
 
     void stop_recording();
 
-    //TODO
-    //void wait_for_recording_done();
+    bool is_recording();
+
+    /** Waits for recording to be done. Returns true if recording stopped, false if timeout occurred. */
+    bool wait_for_recording_done(int timeout_ms = 0);
 
     /** Transfers images from the segment
-    * @param Segment - Camera memory segment to transfer from (Index starts at 1)
+    * @param segment - Camera memory segment to transfer from (Index starts at 1)
     * @param skip_images - Number of images to skip before first image.
     * @param max_images - Number of images to transfer at most (fewer will be transferred if there are fewer in the segment)
+    * @return number of images transferred
     */
-    void transfer_to_tiff(WORD segment, unsigned int skip_images, unsigned int max_images, std::string outpath);
+    unsigned int transfer_to_tiff(WORD segment, unsigned int skip_images, unsigned int max_images, std::string outpath);
 
     /** Transfers images from the segment and performs MIP on the fly
-    * @param Segment - Camera memory segment to transfer from (Index starts at 1)
+    * @param segment - Camera memory segment to transfer from (Index starts at 1)
     * @param skip_images - Number of images to skip before first image.
     * @param images_per_mip - Number of images to join in one mip
     * @param num_mips - Number of mips to perform.
     *        Number of images transferred will be images_per_mip * num_mips.
+    * @return number of mips transferred
     */
-    void transfer_mip_to_tiff(WORD Segment, unsigned int skip_images, unsigned int images_per_mip, unsigned int num_mips, std::string outpath);
+    unsigned int transfer_mip_to_tiff(WORD segment, unsigned int skip_images, unsigned int images_per_mip, unsigned int num_mips, std::string outpath);
 
     /** Transfers images from the segment and performs operation given as callback
-	* @param Segment - Camera memory segment to transfer from (Index starts at 1)
+	* @param segment - Camera memory segment to transfer from (Index starts at 1)
 	* @param skip_images - Number of images to skip before first image.
 	* @param max_images - Number of images to transfer at most (fewer will be transferred if there are fewer in the segment).
              Set to maximum int value to transfer all images.
 	*/
-    void transfer_internal(WORD Segment, unsigned int skip_images, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer &)> image_callback);
+    void transfer_internal(WORD segment, unsigned int skip_images, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer &)> image_callback);
 
     void close();
 

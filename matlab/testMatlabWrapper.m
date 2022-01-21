@@ -16,22 +16,40 @@ clib.pco_wrapper.openConsole();
 
 c.open(0);
 
-%% 
+%% Setup camera
+% You can also use pco.camware to set this manually and then
+% use this script just for recording
 c.reset_camera_settings();
 c.set_framerate_exposure(1, 1e6, 1e6); % 1kHz, 1ms
-%c.set_segment_sizes([...]);
-c.clear_active_segment();
-
 c.arm_camera();
-%% 
-% This is not accurate at all. Better record fixed number of frames.
-% But I have not implemented that yet
-c.start_recording();
-pause(1); 
-c.stop_recording();
 
-%%
-image = c.transfer_mip_to_tiff(1, 1, 100, 10, "mip.tiff");
-all_images = c.transfer_to_tiff(1, 1, 1000, "all.tiff");
+c.set_segment_sizes(500, 1000, 0, 0);
+
+%% Record something in segment 1 but transfer later
+set_active_segment(1);
+c.start_recording();
+if ~c.wait_for_recording_done(5000)
+    c.stop_recording();
+end
+
+%% Record 10 bursts of 10 MIPs using segment 2
+set_active_segment(2)
+for i = 1:10
+    c.clear_active_segment();
+
+    c.start_recording();
+    if ~c.wait_for_recording_done(5000)
+        c.stop_recording();
+    end
+
+    % Transfer both MIP and full data. In practice you probably don't want to do that
+    % Better just transfer all and perform MIP later. But I want to test both functions
+    c.transfer_mip_to_tiff(2, 0, 100, 10, "mip.tiff");
+    c.transfer_to_tiff(2, 0, 1000, "all.tiff");
+end
+
+%% Now transfer from segment 1
+c.transfer_mip_to_tiff(1, 0, 100, 5, "mip.tiff");
+
 %%
 c.close()

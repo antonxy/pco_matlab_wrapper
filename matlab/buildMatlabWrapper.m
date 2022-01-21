@@ -15,10 +15,7 @@ clibgen.generateLibraryDefinition(...
 
 validate(definepco_wrapper);
 
-disp("Added to definition")
-
 %% Build library
 % Build dll from library definition
 % Requires Visual Studio (2019?) to be installed.
-% Maybe mingw also works?
 build(definepco_wrapper);

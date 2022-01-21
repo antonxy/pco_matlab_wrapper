@@ -4,6 +4,8 @@
 #include <iostream>
 #include <memory>
 #include <array>
+#include <chrono>
+#include <thread>
 
 #include "tinytiffwriter.h"
 #include "pco_err.h"
@@ -151,14 +153,6 @@ void PCOCamera::reset_camera_settings() {
     PCOCheck(PCO_ResetSettingsToDefault(cam));
 }
 
-/**
-* Set framerate and exposure time 
-* @param frameRateMode
-*        0 - Auto mode, camera decides
-*        1 - Frame rate has priority
-*        2 - Exposure time has priority
-*        3 - Strict, error if the two don't match
-*/
 void PCOCamera::set_framerate_exposure(WORD frameRateMode, DWORD frameRate_mHz, DWORD expTime_ns) {
     WORD frameRateStatus;
     PCOCheck(PCO_SetFrameRate(cam, &frameRateStatus, frameRateMode, &frameRate_mHz, &expTime_ns));
@@ -168,9 +162,26 @@ void PCOCamera::set_roi(WORD roiX0, WORD roiY0, WORD roiX1, WORD roiY1) {
     PCOCheck(PCO_SetROI(cam, roiX0, roiY0, roiX1, roiY1));
 }
 
-void PCOCamera::set_segment_sizes(DWORD pagesPerSegment[4]) {
-    //TODO need function to get page size
-    //TODO Check PCO_SetStorageMode - maybe allows transfer while recording
+//TODO Check PCO_SetStorageMode - maybe allows transfer while recording
+
+void PCOCamera::set_segment_sizes(DWORD segment1, DWORD segment2, DWORD segment3, DWORD segment4) {
+    //This has to be called after PCO_ArmCamera
+    WORD XResAct, YResAct, XResMax, YResMax;
+    PCOCheck(PCO_GetSizes(cam, &XResAct, &YResAct, &XResMax, &YResMax));
+
+    DWORD RamSize; WORD PageSize;
+    //Ram size in pages and page size in pixels
+    PCOCheck(PCO_GetCameraRamSize(cam, &RamSize, &PageSize));
+
+    DWORD image_size_px = XResAct * YResAct;
+
+    DWORD image_size_pages = image_size_px / PageSize;
+    if (image_size_px % PageSize != 0) { //Round up integer division
+        image_size_pages++;
+    }
+
+    DWORD pagesPerSegment[4] = {segment1 * image_size_pages, segment2 * image_size_pages, segment3 * image_size_pages, segment4 * image_size_pages};
+    //This sets segment sizes in **RAM pages** not bytes or pixels
     PCOCheck(PCO_SetCameraRamSegmentSize(cam, pagesPerSegment));
 }
 
@@ -182,7 +193,6 @@ void PCOCamera::clear_active_segment() {
     PCOCheck(PCO_ClearRamSegment(cam));
 }
 
-/** Validates the configuration of the camera and sets the camera ready for recording */
 void PCOCamera::arm_camera() {
     //Arm camera - this makes sure any previous configuration changes are applied
     PCOCheck(PCO_ArmCamera(cam));
@@ -225,9 +235,31 @@ void PCOCamera::stop_recording() {
     PCOCheck(PCO_SetRecordingState(cam, 0));
 }
 
-void PCOCamera::transfer_to_tiff(WORD segment, unsigned int skip_images, unsigned int max_images, std::string outpath) {
+bool PCOCamera::is_recording() {
+    WORD state;
+    PCOCheck(PCO_GetRecordingState(cam, &state));
+    if (state > 1) {
+        throw std::runtime_error("Invalid state returned by camera");
+    }
+    return state == 1;
+}
+    
+bool PCOCamera::wait_for_recording_done(int timeout_ms) {
+    auto before = std::chrono::steady_clock::now();
+    while(is_recording()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        auto now = std::chrono::steady_clock::now();
+        if (timeout_ms > 0 && now - before > std::chrono::milliseconds(timeout_ms)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+
+unsigned int PCOCamera::transfer_to_tiff(WORD segment, unsigned int skip_images, unsigned int max_images, std::string outpath) {
     TinyTIFFWriterFile* tif;
-    //TODO Split image if > 4GiB
+    //TODO Split image if > 4GiB, or at least check that we don't write more
     unsigned int transferred_images = 0;
     transfer_internal(segment, skip_images, max_images, [&tif, outpath, &transferred_images](unsigned int transfer_image_index, const PCOBuffer& buffer) {
         if (transfer_image_index == 0) {
@@ -244,11 +276,12 @@ void PCOCamera::transfer_to_tiff(WORD segment, unsigned int skip_images, unsigne
     });
     TinyTIFFWriter_close(tif);
     std::cout << "\rTransferred " << transferred_images << " images" << std::endl;
+    return transferred_images;
 }
 
-void PCOCamera::transfer_mip_to_tiff(WORD segment, unsigned int skip_images, unsigned int images_per_mip, unsigned int num_mips, std::string outpath) {
+unsigned int PCOCamera::transfer_mip_to_tiff(WORD segment, unsigned int skip_images, unsigned int images_per_mip, unsigned int num_mips, std::string outpath) {
     TinyTIFFWriterFile* tif;
-    //TODO Split image if > 4GiB
+    //TODO Split image if > 4GiB, or at least check that we don't write more
     std::unique_ptr<uint16_t[]> MIP_buffer;
     unsigned int images_to_transfer = images_per_mip * num_mips;
     if (num_mips == std::numeric_limits<unsigned int>::max()) {
@@ -297,14 +330,9 @@ void PCOCamera::transfer_mip_to_tiff(WORD segment, unsigned int skip_images, uns
     if (lost_images != 0) {
         std::cout << "Lost " << lost_images << " images which did not fill a MIP" << std::endl;
     }
+    return transferred_mips;
 }
 
-/** Transfers images from the segment and performs operation given as callback
-* @param Segment - Camera memory segment to transfer from (Index starts at 1)
-* @param skip_images - Number of images to skip before first image.
-* @param max_images - Number of images to transfer at most (fewer will be transfered if there are fewer in the segment).
-            Set to maximum int value to transfer all images.
-*/
 void PCOCamera::transfer_internal(WORD Segment, unsigned int skip_images, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer &)> image_callback) {
     DWORD ValidImageCnt, MaxImageCnt;
     PCOCheck(PCO_GetNumberOfImagesInSegment(cam, Segment, &ValidImageCnt, &MaxImageCnt));
@@ -343,7 +371,7 @@ void PCOCamera::transfer_internal(WORD Segment, unsigned int skip_images, unsign
     unsigned int num_images_to_transfer = std::min(((unsigned int)ValidImageCnt) - skip_images, max_images);
 
     // Cancel all image transfers when exiting from this function so that nothing is
-    // transfered into freed buffers
+    // transferred into freed buffers
     defer _1(nullptr, [this](...) {
         PCO_CancelImages(cam);
     });
@@ -355,7 +383,7 @@ void PCOCamera::transfer_internal(WORD Segment, unsigned int skip_images, unsign
         pco_buffers[transfer_image_index].start_transfer(camera_image_index);
     }
 
-    // Wait for tranfers in order, when a transfer is finished use the buffer to start the next one
+    // Wait for transfers in order, when a transfer is finished use the buffer to start the next one
     int currentBufferIdx = 0;
     for (int transfer_image_index = 0; transfer_image_index < num_images_to_transfer; ++transfer_image_index) {
         int camera_image_index = transfer_image_index + skip_images + 1;
@@ -378,7 +406,7 @@ void PCOCamera::transfer_internal(WORD Segment, unsigned int skip_images, unsign
 
     QueryPerformanceCounter(&end);
     double interval = (double)(end.QuadPart - start.QuadPart) / frequency.QuadPart;
-    DEBUGPRINT printf("Transfered %d images in %f seconds\n", num_images_to_transfer, interval);
+    DEBUGPRINT printf("Transferred %d images in %f seconds\n", num_images_to_transfer, interval);
     double mb_per_image = double(XResAct) * double(YResAct) * 3 / 2 / 1e6;
     DEBUGPRINT printf("Image size: %d x %d - %f MB\n", XResAct, YResAct, mb_per_image);
     double mb_per_sec = mb_per_image * num_images_to_transfer / interval;
