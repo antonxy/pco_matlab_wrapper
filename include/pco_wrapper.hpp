@@ -57,6 +57,8 @@ public:
     void set_framerate_exposure(WORD frameRateMode, DWORD frameRate_mHz, DWORD expTime_ns);
     
     void set_roi(WORD roiX0, WORD roiY0, WORD roiX1, WORD roiY1);
+
+	void set_recorder_mode_sequence();
     
     /** Validates the configuration of the camera and sets the camera ready for recording */
     void arm_camera();
@@ -86,6 +88,10 @@ public:
     void stop_recording();
 
     bool is_recording();
+
+	int get_num_images_in_segment(WORD segment);
+
+	int get_max_num_images_in_segment(WORD segment);
 
     /** Waits for recording to be done. Returns true if recording stopped, false if timeout occurred. */
     bool wait_for_recording_done(int timeout_ms = 0);

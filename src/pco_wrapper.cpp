@@ -162,6 +162,11 @@ void PCOCamera::set_roi(WORD roiX0, WORD roiY0, WORD roiX1, WORD roiY1) {
     PCOCheck(PCO_SetROI(cam, roiX0, roiY0, roiX1, roiY1));
 }
 
+void PCOCamera::set_recorder_mode_sequence() {
+	PCOCheck(PCO_SetStorageMode(cam, 0));
+	PCOCheck(PCO_SetRecorderSubmode(cam, 0));
+}
+
 //TODO Check PCO_SetStorageMode - maybe allows transfer while recording
 
 void PCOCamera::set_segment_sizes(DWORD segment1, DWORD segment2, DWORD segment3, DWORD segment4) {
@@ -173,6 +178,10 @@ void PCOCamera::set_segment_sizes(DWORD segment1, DWORD segment2, DWORD segment3
     //Ram size in pages and page size in pixels
     PCOCheck(PCO_GetCameraRamSize(cam, &RamSize, &PageSize));
 
+
+	//PCO Docs:
+	//The number of CamRAM pages needed for one image is calculated as image size in pixel
+	//divided by CamRAM page size. The result must be rounded up to the next integer.
     DWORD image_size_px = XResAct * YResAct;
 
     DWORD image_size_pages = image_size_px / PageSize;
@@ -183,6 +192,9 @@ void PCOCamera::set_segment_sizes(DWORD segment1, DWORD segment2, DWORD segment3
     DWORD pagesPerSegment[4] = {segment1 * image_size_pages, segment2 * image_size_pages, segment3 * image_size_pages, segment4 * image_size_pages};
     //This sets segment sizes in **RAM pages** not bytes or pixels
     PCOCheck(PCO_SetCameraRamSegmentSize(cam, pagesPerSegment));
+
+	//TODO Even though the calculation seems correct the size is slightly off
+	//For 500 images, only 499 actually fit, for 10000 only 9998
 }
 
 void PCOCamera::set_active_segment(WORD segment) {
@@ -242,6 +254,18 @@ bool PCOCamera::is_recording() {
         throw std::runtime_error("Invalid state returned by camera");
     }
     return state == 1;
+}
+
+int PCOCamera::get_num_images_in_segment(WORD segment) {
+	DWORD ValidImageCnt, MaxImageCnt;
+	PCOCheck(PCO_GetNumberOfImagesInSegment(cam, segment, &ValidImageCnt, &MaxImageCnt));
+	return ValidImageCnt;
+}
+
+int PCOCamera::get_max_num_images_in_segment(WORD segment) {
+	DWORD ValidImageCnt, MaxImageCnt;
+	PCOCheck(PCO_GetNumberOfImagesInSegment(cam, segment, &ValidImageCnt, &MaxImageCnt));
+	return MaxImageCnt;
 }
     
 bool PCOCamera::wait_for_recording_done(int timeout_ms) {
