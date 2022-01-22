@@ -46,13 +46,13 @@ public:
 
 	/** Connects to the camera on a specific interface */
 	void open(WORD interface_type);
-    
+
     void reset_camera_settings();
 
 	void reboot();
 
     /**
-    * Set framerate and exposure time 
+    * Set framerate and exposure time
     * @param frameRateMode
     *        0 - Auto mode, camera decides
     *        1 - Frame rate has priority
@@ -60,11 +60,11 @@ public:
     *        3 - Strict, error if the two don't match
     */
     void set_framerate_exposure(WORD frameRateMode, DWORD frameRate_mHz, DWORD expTime_ns);
-    
+
     void set_roi(WORD roiX0, WORD roiY0, WORD roiX1, WORD roiY1);
 
 	void set_recorder_mode_sequence();
-    
+
     /** Validates the configuration of the camera and sets the camera ready for recording */
     void arm_camera();
 
@@ -110,6 +110,10 @@ public:
     * @param segment - Camera memory segment to transfer from (Index starts at 1)
     * @param skip_images - Number of images to skip before first image.
     * @param max_images - Number of images to transfer at most (fewer will be transferred if there are fewer in the segment)
+    * @param outpath - Filename of the resulting file.
+    *        If the tiff file is too large it will be split and a number appended to the name.
+    *        E.g. file.tiff -> file_1.tiff -> file_2.tiff
+    *        Make sure you consider this when naming files to avoid overwriting files.
     * @return Number of images actually transferred
     */
     unsigned int transfer_to_tiff(unsigned int skip_images, unsigned int max_images, std::string outpath);
@@ -120,6 +124,10 @@ public:
     * @param images_per_mip - Number of images to join in one mip
     * @param num_mips - Number of mips to transfer at most (fewer will be transferred if there are fewer in the segment).
     *        Number of images transferred will be images_per_mip * num_mips.
+    * @param outpath - Filename of the resulting file.
+    *        If the tiff file is too large it will be split and a number appended to the name.
+    *        E.g. file.tiff -> file_1.tiff -> file_2.tiff
+    *        Make sure you consider this when naming files to avoid overwriting files.
     * @return Number of mips actually transferred
     */
     unsigned int transfer_mip_to_tiff(unsigned int skip_images, unsigned int images_per_mip, unsigned int num_mips, std::string outpath);

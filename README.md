@@ -51,6 +51,7 @@ The MATLAB wrapper can be used to script multiple recording operations.
 On my PC at least `meson test` must be run from the *Visual Studio Native Tools Command Prompt*,
 otherwise it doesn't find `ninja` even though `meson build` can find it.
 
-### Issues
-- **Currently tiff files bigger than 4GiB can be written but will lead to a corrupt file**
-- It might be possible to crash the application in a few ways, e.g. using closed camera handle.
+## Important notes
+The library does not check if a file already exists. Make sure you are not overwriting important files.
+If a tiff file gets too large it will be split and a number appended to the filename, e.g. `file.tiff -> file_1.tiff -> file_2.tiff`.
+So you also have to make sure no file will be overwritten if a number gets appended to the filename.
