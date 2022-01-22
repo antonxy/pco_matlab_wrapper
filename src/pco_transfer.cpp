@@ -71,12 +71,13 @@ int main(int argc, char** argv) {
 	//
 	try {
 		PCOCamera cam;
-		cam.open(0);
+		cam.open();
+		cam.set_active_segment(segment);
 		if (selected == mode::mip) {
-			cam.transfer_mip_to_tiff(segment, skip_images, images_per_mip, num_mips, outpath);
+			cam.transfer_mip_to_tiff(skip_images, images_per_mip, num_mips, outpath);
 		}
 		else if (selected == mode::full_transfer) {
-			cam.transfer_to_tiff(segment, skip_images, num_images, outpath);
+			cam.transfer_to_tiff(skip_images, num_images, outpath);
 		}
 		cam.close();
 		return 0;

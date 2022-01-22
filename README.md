@@ -44,6 +44,13 @@ The MATLAB wrapper can be used to script multiple recording operations.
 - Add `$PCO_SDK_DIR/bin64` to your `PATH` or copy `SC2_Cam.dll` and related camera driver dlls to the current folder.
 - Run `pco_transfer.exe -h` to see available options
 
+## Run tests
+- Connect PC to camera
+- Run `meson test`
+
+On my PC at least `meson test` must be run from the *Visual Studio Native Tools Command Prompt*,
+otherwise it doesn't find `ninja` even though `meson build` can find it.
+
 ### Issues
 - **Currently tiff files bigger than 4GiB can be written but will lead to a corrupt file**
-- It's possible to crash the application in a few ways. E.g. transferring 0 images.
+- It might be possible to crash the application in a few ways, e.g. using closed camera handle.

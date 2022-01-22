@@ -113,11 +113,7 @@ void PCOBuffer::wait_for_buffer() {
         PCOCheck(PCO_GetBufferStatus(cam, num, &StatusDll, &StatusDrv));
 
         //!!! IMPORTANT StatusDrv must always be checked for errors 
-        if (StatusDrv != PCO_NOERROR)
-        {
-            printf("buf error status 0x%08x\n", StatusDrv);
-            throw std::runtime_error("Buffer error status");
-        }
+		PCOCheck(StatusDrv);
     }
     else
     {
@@ -126,8 +122,10 @@ void PCOBuffer::wait_for_buffer() {
 }
 
 /** Connects to the camera */
-void PCOCamera::open(WORD wCamNum) {
-    PCOCheck(PCO_OpenCamera(&cam, wCamNum));
+void PCOCamera::open() {
+
+	//According to PCO Docs parameter wCamNum is not used and the first found camera is connected - haha
+    PCOCheck(PCO_OpenCamera(&cam, 0));
 
     // Check if camera has internal memory
     PCO_Description strDescription;
@@ -148,9 +146,63 @@ void PCOCamera::open(WORD wCamNum) {
     }
 }
 
+void PCOCamera::open(WORD interface_type) {
+	//TODO OpenCameraEx could allow faster connection by not trying all interfaces
+
+	PCO_OpenStruct openStruct;
+	memset(&openStruct, 0, sizeof(openStruct));
+	openStruct.wSize = sizeof(openStruct);
+	openStruct.wInterfaceType = interface_type;
+
+	//TODO This is not working
+	//Find first available camera on interface
+	bool found = false;
+	for (WORD i = 0; i < 1000; ++i) {
+		openStruct.wCameraNumber = i;
+		HANDLE tmpCam = nullptr;
+		int err = PCO_OpenCameraEx(&tmpCam, &openStruct);
+		if (err == PCO_NOERROR) {
+			cam = tmpCam;
+			found = true;
+			break;
+		}
+		if (err == PCO_ERROR_DRIVER_NODRIVER) {
+			PCOCheck(err);
+		}
+		else {
+			continue;
+		}
+	}
+	if (!found) {
+		throw std::runtime_error("Did not find camera");
+	}
+
+	// Check if camera has internal memory
+	PCO_Description strDescription;
+	strDescription.wSize = sizeof(PCO_Description);
+	PCOCheck(PCO_GetCameraDescription(cam, &strDescription));
+	if (strDescription.dwGeneralCapsDESC1 & GENERALCAPS1_NO_RECORDER)
+	{
+		throw std::runtime_error("Camera found, but it has no internal memory\n");
+	}
+
+	WORD RecordingState;
+	PCOCheck(PCO_GetRecordingState(cam, &RecordingState));
+	//0 = stopped, 1 = running
+	//Stop recording if camera is recording
+	if (RecordingState)
+	{
+		PCOCheck(PCO_SetRecordingState(cam, 0));
+	}
+}
+
 void PCOCamera::reset_camera_settings() {
     //set camera to default state
     PCOCheck(PCO_ResetSettingsToDefault(cam));
+}
+
+void PCOCamera::reboot() {
+	PCOCheck(PCO_RebootCamera(cam));
 }
 
 void PCOCamera::set_framerate_exposure(WORD frameRateMode, DWORD frameRate_mHz, DWORD expTime_ns) {
@@ -178,27 +230,43 @@ void PCOCamera::set_segment_sizes(DWORD segment1, DWORD segment2, DWORD segment3
     //Ram size in pages and page size in pixels
     PCOCheck(PCO_GetCameraRamSize(cam, &RamSize, &PageSize));
 
-
 	//PCO Docs:
 	//The number of CamRAM pages needed for one image is calculated as image size in pixel
 	//divided by CamRAM page size. The result must be rounded up to the next integer.
     DWORD image_size_px = XResAct * YResAct;
 
     DWORD image_size_pages = image_size_px / PageSize;
+
+	//Somehow when setting segment size using camware there is always one extra page per image added
+	//I don't know why - didn't find anything in the documentation.
+	//But without it the images don't fit
+	image_size_pages++;
+
     if (image_size_px % PageSize != 0) { //Round up integer division
         image_size_pages++;
     }
 
+	DEBUGPRINT std::cerr << "Set segment size - ImagePx: " << image_size_px << ", PageSize: " << PageSize << ", image_pages: " << image_size_pages << std::endl;
+
     DWORD pagesPerSegment[4] = {segment1 * image_size_pages, segment2 * image_size_pages, segment3 * image_size_pages, segment4 * image_size_pages};
     //This sets segment sizes in **RAM pages** not bytes or pixels
     PCOCheck(PCO_SetCameraRamSegmentSize(cam, pagesPerSegment));
+}
 
-	//TODO Even though the calculation seems correct the size is slightly off
-	//For 500 images, only 499 actually fit, for 10000 only 9998
+void PCOCamera::get_segment_sizes_pages(DWORD segmentSizes[4])
+{
+	PCOCheck(PCO_GetCameraRamSegmentSize(cam, segmentSizes));
 }
 
 void PCOCamera::set_active_segment(WORD segment) {
     PCOCheck(PCO_SetActiveRamSegment(cam, segment));
+}
+
+WORD PCOCamera::get_active_segment()
+{
+	WORD segment;
+	PCOCheck(PCO_GetActiveRamSegment(cam, &segment));
+	return segment;
 }
 
 void PCOCamera::clear_active_segment() {
@@ -281,11 +349,11 @@ bool PCOCamera::wait_for_recording_done(int timeout_ms) {
 }
 
 
-unsigned int PCOCamera::transfer_to_tiff(WORD segment, unsigned int skip_images, unsigned int max_images, std::string outpath) {
-    TinyTIFFWriterFile* tif;
+unsigned int PCOCamera::transfer_to_tiff(unsigned int skip_images, unsigned int max_images, std::string outpath) {
+	TinyTIFFWriterFile* tif = nullptr;
     //TODO Split image if > 4GiB, or at least check that we don't write more
     unsigned int transferred_images = 0;
-    transfer_internal(segment, skip_images, max_images, [&tif, outpath, &transferred_images](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+    transfer_internal(skip_images, max_images, [&tif, outpath, &transferred_images](unsigned int transfer_image_index, const PCOBuffer& buffer) {
         if (transfer_image_index == 0) {
             // Allocate image after we receive first one because then we know the image size
             tif = TinyTIFFWriter_open(outpath.c_str(), 16, TinyTIFFWriter_UInt, 0, buffer.xres, buffer.yres, TinyTIFFWriter_Greyscale);
@@ -296,15 +364,17 @@ unsigned int PCOCamera::transfer_to_tiff(WORD segment, unsigned int skip_images,
 
         TinyTIFFWriter_writeImage(tif, buffer.addr);
         transferred_images += 1;
-        if (transferred_images % 10 == 0) std::cout << "\r" << transferred_images;
     });
-    TinyTIFFWriter_close(tif);
-    std::cout << "\rTransferred " << transferred_images << " images" << std::endl;
+	if (tif != nullptr) {
+		TinyTIFFWriter_close(tif);
+	}
+    std::cout << "Transferred " << transferred_images << " images" << std::endl;
     return transferred_images;
 }
 
-unsigned int PCOCamera::transfer_mip_to_tiff(WORD segment, unsigned int skip_images, unsigned int images_per_mip, unsigned int num_mips, std::string outpath) {
-    TinyTIFFWriterFile* tif;
+unsigned int PCOCamera::transfer_mip_to_tiff(unsigned int skip_images, unsigned int images_per_mip, unsigned int num_mips, std::string outpath) {
+	//TODO wrap in unique_ptr
+	TinyTIFFWriterFile* tif = nullptr;
     //TODO Split image if > 4GiB, or at least check that we don't write more
     std::unique_ptr<uint16_t[]> MIP_buffer;
     unsigned int images_to_transfer = images_per_mip * num_mips;
@@ -313,7 +383,7 @@ unsigned int PCOCamera::transfer_mip_to_tiff(WORD segment, unsigned int skip_ima
     }
     unsigned int transferred_images = 0;
     unsigned int transferred_mips = 0;
-    transfer_internal(segment, skip_images, images_per_mip * num_mips, [&tif, outpath, &MIP_buffer, images_per_mip, &transferred_images, &transferred_mips](unsigned int transfer_image_index, const PCOBuffer& buffer) {
+    transfer_internal(skip_images, images_per_mip * num_mips, [&tif, outpath, &MIP_buffer, images_per_mip, &transferred_images, &transferred_mips](unsigned int transfer_image_index, const PCOBuffer& buffer) {
         int numPix = buffer.xres * buffer.yres;
         if (transfer_image_index == 0) {
             // Allocate image after we receive first one because then we know the image size
@@ -345,19 +415,22 @@ unsigned int PCOCamera::transfer_mip_to_tiff(WORD segment, unsigned int skip_ima
             memset(MIP_buffer.get(), 0, numPix * sizeof(uint16_t));
         }
         transferred_images += 1;
-        if (transferred_images % 10 == 0) std::cout << "\r" << transferred_images;
     });
-    TinyTIFFWriter_close(tif);
+	if (tif != nullptr) {
+		TinyTIFFWriter_close(tif);
+	}
 
-    std::cout << "\rTransferred " << transferred_images << " images into " << transferred_mips << " MIPs" << std::endl;
-    unsigned int lost_images = transferred_images % transferred_mips;
+    std::cout << "Transferred " << transferred_images << " images into " << transferred_mips << " MIPs" << std::endl;
+    unsigned int lost_images = transferred_images - (transferred_mips * images_per_mip);
     if (lost_images != 0) {
         std::cout << "Lost " << lost_images << " images which did not fill a MIP" << std::endl;
     }
     return transferred_mips;
 }
 
-void PCOCamera::transfer_internal(WORD Segment, unsigned int skip_images, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer &)> image_callback) {
+void PCOCamera::transfer_internal(unsigned int skip_images, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer &)> image_callback) {
+	WORD Segment = get_active_segment();
+
     DWORD ValidImageCnt, MaxImageCnt;
     PCOCheck(PCO_GetNumberOfImagesInSegment(cam, Segment, &ValidImageCnt, &MaxImageCnt));
 

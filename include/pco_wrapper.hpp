@@ -42,9 +42,14 @@ public:
 	{ }
 
     /** Connects to the camera */
-    void open(WORD wCamNum);
+    void open();
+
+	/** Connects to the camera on a specific interface */
+	void open(WORD interface_type);
     
     void reset_camera_settings();
+
+	void reboot();
 
     /**
     * Set framerate and exposure time 
@@ -71,7 +76,12 @@ public:
     */
     void set_segment_sizes(DWORD segment1, DWORD segment2, DWORD segment3, DWORD segment4);
 
+	/** Get camera segment sizes in **RAM pages** not images */
+	void get_segment_sizes_pages(DWORD segmentSizes[4]);
+
     void set_active_segment(WORD segment);
+
+	WORD get_active_segment();
 
     void clear_active_segment();
 
@@ -100,32 +110,32 @@ public:
     * @param segment - Camera memory segment to transfer from (Index starts at 1)
     * @param skip_images - Number of images to skip before first image.
     * @param max_images - Number of images to transfer at most (fewer will be transferred if there are fewer in the segment)
-    * @return number of images transferred
+    * @return Number of images actually transferred
     */
-    unsigned int transfer_to_tiff(WORD segment, unsigned int skip_images, unsigned int max_images, std::string outpath);
+    unsigned int transfer_to_tiff(unsigned int skip_images, unsigned int max_images, std::string outpath);
 
     /** Transfers images from the segment and performs MIP on the fly
     * @param segment - Camera memory segment to transfer from (Index starts at 1)
     * @param skip_images - Number of images to skip before first image.
     * @param images_per_mip - Number of images to join in one mip
-    * @param num_mips - Number of mips to perform.
+    * @param num_mips - Number of mips to transfer at most (fewer will be transferred if there are fewer in the segment).
     *        Number of images transferred will be images_per_mip * num_mips.
-    * @return number of mips transferred
+    * @return Number of mips actually transferred
     */
-    unsigned int transfer_mip_to_tiff(WORD segment, unsigned int skip_images, unsigned int images_per_mip, unsigned int num_mips, std::string outpath);
-
-    /** Transfers images from the segment and performs operation given as callback
-	* @param segment - Camera memory segment to transfer from (Index starts at 1)
-	* @param skip_images - Number of images to skip before first image.
-	* @param max_images - Number of images to transfer at most (fewer will be transferred if there are fewer in the segment).
-             Set to maximum int value to transfer all images.
-	*/
-    void transfer_internal(WORD segment, unsigned int skip_images, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer &)> image_callback);
+    unsigned int transfer_mip_to_tiff(unsigned int skip_images, unsigned int images_per_mip, unsigned int num_mips, std::string outpath);
 
     void close();
 
 private:
     HANDLE cam;
+
+	/** Transfers images from the segment and performs operation given as callback
+	* @param segment - Camera memory segment to transfer from (Index starts at 1)
+	* @param skip_images - Number of images to skip before first image.
+	* @param max_images - Number of images to transfer at most (fewer will be transferred if there are fewer in the segment).
+			 Set to maximum int value to transfer all images.
+	*/
+	void transfer_internal(unsigned int skip_images, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer&)> image_callback);
 };
 
 #endif //PCO_WRAPPER_H
