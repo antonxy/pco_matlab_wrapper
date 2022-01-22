@@ -354,7 +354,7 @@ unsigned int PCOCamera::transfer_to_tiff(unsigned int skip_images, unsigned int 
 	TiffWriter tif(outpath);
     unsigned int transferred_images = 0;
     transfer_internal(skip_images, max_images, [&tif, outpath, &transferred_images](unsigned int transfer_image_index, const PCOBuffer& buffer) {
-        tif.write_frame(buffer.xres, buffer.yres, 16, buffer.addr);
+        tif.write_frame(buffer.xres, buffer.yres, buffer.addr);
         transferred_images += 1;
     });
     std::cout << "Transferred " << transferred_images << " images" << std::endl;
@@ -391,7 +391,7 @@ unsigned int PCOCamera::transfer_mip_to_tiff(unsigned int skip_images, unsigned 
 
         if (transfer_image_index % images_per_mip == images_per_mip - 1) {
             //Save image
-            tif.write_frame(buffer.xres, buffer.yres, 16, MIP_buffer.get());
+            tif.write_frame(buffer.xres, buffer.yres, MIP_buffer.get());
             transferred_mips += 1;
 
             //Reset MIP

@@ -1,7 +1,6 @@
 #include <iostream>
 #include "clipp.hpp"
 #include "pco_wrapper.hpp"
-#include "tinytiffwriter.h"
 
 using namespace clipp;
 
