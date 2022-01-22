@@ -5,11 +5,11 @@
 
 int main(int argc, char** argv) {
     bool success = true;
-    char * filename = tmpnam(nullptr);
+    const char * filename = "testtiff.tif";
     try {
         std::string filename_str(filename);
         std::cout << "Creating test tiff in " << filename_str << std::endl;
-        TiffWriter tw(filename_str + ".tif");
+        TiffWriter tw(filename_str);
         uint16_t* buffer = new uint16_t[1008*1008]();
         memset(buffer, 111, 1008*1008*2);
         for (int i = 0; i < 10; ++i) {
