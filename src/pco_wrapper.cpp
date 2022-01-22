@@ -7,7 +7,8 @@
 #include <chrono>
 #include <thread>
 
-#include "tinytiffwriter.h"
+#include "tiff_writer.hpp"
+
 #include "pco_err.h"
 #include "sc2_SDKStructures.h"
 #include "SC2_SDKAddendum.h"
@@ -112,7 +113,7 @@ void PCOBuffer::wait_for_buffer() {
         DWORD StatusDrv = 0;
         PCOCheck(PCO_GetBufferStatus(cam, num, &StatusDll, &StatusDrv));
 
-        //!!! IMPORTANT StatusDrv must always be checked for errors 
+        //!!! IMPORTANT StatusDrv must always be checked for errors
 		PCOCheck(StatusDrv);
     }
     else
@@ -335,7 +336,7 @@ int PCOCamera::get_max_num_images_in_segment(WORD segment) {
 	PCOCheck(PCO_GetNumberOfImagesInSegment(cam, segment, &ValidImageCnt, &MaxImageCnt));
 	return MaxImageCnt;
 }
-    
+
 bool PCOCamera::wait_for_recording_done(int timeout_ms) {
     auto before = std::chrono::steady_clock::now();
     while(is_recording()) {
@@ -350,32 +351,19 @@ bool PCOCamera::wait_for_recording_done(int timeout_ms) {
 
 
 unsigned int PCOCamera::transfer_to_tiff(unsigned int skip_images, unsigned int max_images, std::string outpath) {
-	TinyTIFFWriterFile* tif = nullptr;
-    //TODO Split image if > 4GiB, or at least check that we don't write more
+	TiffWriter tif(outpath);
     unsigned int transferred_images = 0;
     transfer_internal(skip_images, max_images, [&tif, outpath, &transferred_images](unsigned int transfer_image_index, const PCOBuffer& buffer) {
-        if (transfer_image_index == 0) {
-            // Allocate image after we receive first one because then we know the image size
-            tif = TinyTIFFWriter_open(outpath.c_str(), 16, TinyTIFFWriter_UInt, 0, buffer.xres, buffer.yres, TinyTIFFWriter_Greyscale);
-            if (!tif) {
-                throw std::runtime_error("Could not create tiff file");
-            }
-        }
-
-        TinyTIFFWriter_writeImage(tif, buffer.addr);
+        tif.write_frame(buffer.xres, buffer.yres, 16, buffer.addr);
         transferred_images += 1;
     });
-	if (tif != nullptr) {
-		TinyTIFFWriter_close(tif);
-	}
     std::cout << "Transferred " << transferred_images << " images" << std::endl;
     return transferred_images;
 }
 
 unsigned int PCOCamera::transfer_mip_to_tiff(unsigned int skip_images, unsigned int images_per_mip, unsigned int num_mips, std::string outpath) {
-	//TODO wrap in unique_ptr
-	TinyTIFFWriterFile* tif = nullptr;
-    //TODO Split image if > 4GiB, or at least check that we don't write more
+	TiffWriter tif(outpath);
+
     std::unique_ptr<uint16_t[]> MIP_buffer;
     unsigned int images_to_transfer = images_per_mip * num_mips;
     if (num_mips == std::numeric_limits<unsigned int>::max()) {
@@ -386,12 +374,7 @@ unsigned int PCOCamera::transfer_mip_to_tiff(unsigned int skip_images, unsigned 
     transfer_internal(skip_images, images_per_mip * num_mips, [&tif, outpath, &MIP_buffer, images_per_mip, &transferred_images, &transferred_mips](unsigned int transfer_image_index, const PCOBuffer& buffer) {
         int numPix = buffer.xres * buffer.yres;
         if (transfer_image_index == 0) {
-            // Allocate image after we receive first one because then we know the image size
-            tif = TinyTIFFWriter_open(outpath.c_str(), 16, TinyTIFFWriter_UInt, 0, buffer.xres, buffer.yres, TinyTIFFWriter_Greyscale);
-            if (!tif) {
-                throw std::runtime_error("Could not create tiff file");
-            }
-
+            // Allocate buffer after we receive first image because then we know the image size
             MIP_buffer = std::unique_ptr<uint16_t[]>(new uint16_t[numPix]);
             memset(MIP_buffer.get(), 0, numPix * sizeof(uint16_t));
         }
@@ -408,7 +391,7 @@ unsigned int PCOCamera::transfer_mip_to_tiff(unsigned int skip_images, unsigned 
 
         if (transfer_image_index % images_per_mip == images_per_mip - 1) {
             //Save image
-            TinyTIFFWriter_writeImage(tif, buffer.addr);
+            tif.write_frame(buffer.xres, buffer.yres, 16, MIP_buffer.get());
             transferred_mips += 1;
 
             //Reset MIP
@@ -416,9 +399,6 @@ unsigned int PCOCamera::transfer_mip_to_tiff(unsigned int skip_images, unsigned 
         }
         transferred_images += 1;
     });
-	if (tif != nullptr) {
-		TinyTIFFWriter_close(tif);
-	}
 
     std::cout << "Transferred " << transferred_images << " images into " << transferred_mips << " MIPs" << std::endl;
     unsigned int lost_images = transferred_images - (transferred_mips * images_per_mip);
@@ -464,7 +444,7 @@ void PCOCamera::transfer_internal(unsigned int skip_images, unsigned int max_ima
     LARGE_INTEGER end;
     QueryPerformanceFrequency(&frequency);
     QueryPerformanceCounter(&start);
-    
+
     unsigned int num_images_to_transfer = std::min(((unsigned int)ValidImageCnt) - skip_images, max_images);
 
     // Cancel all image transfers when exiting from this function so that nothing is
@@ -484,7 +464,7 @@ void PCOCamera::transfer_internal(unsigned int skip_images, unsigned int max_ima
     int currentBufferIdx = 0;
     for (int transfer_image_index = 0; transfer_image_index < num_images_to_transfer; ++transfer_image_index) {
         int camera_image_index = transfer_image_index + skip_images + 1;
-        
+
         // wait for image transfer
         DEBUGPRINT printf("wait for transfer %d @ buf %d\n", transfer_image_index, currentBufferIdx);
         pco_buffers[currentBufferIdx].wait_for_buffer();
