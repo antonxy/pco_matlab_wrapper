@@ -23,6 +23,7 @@ executable('pco_transfer', 'src/pco_transfer.cpp', dependencies : [pco_wrapper_d
 
 test_with_camera = executable('test_with_camera', 'src/test_with_camera.cpp', dependencies : [pco_wrapper_dep])
 test('Test with camera', test_with_camera)
+executable('pco_speedtest', 'src/pco_speedtest.cpp', dependencies : [pco_wrapper_dep])
 
 test_tiff = executable('test_tiff', 'src/test_tiff.cpp', dependencies : [tiff_writer_dep])
 test('Test TIFF', test_tiff)

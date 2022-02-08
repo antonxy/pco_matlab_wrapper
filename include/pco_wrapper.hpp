@@ -134,9 +134,6 @@ public:
 
     void close();
 
-private:
-    HANDLE cam;
-
 	/** Transfers images from the segment and performs operation given as callback
 	* @param segment - Camera memory segment to transfer from (Index starts at 1)
 	* @param skip_images - Number of images to skip before first image.
@@ -144,6 +141,10 @@ private:
 			 Set to maximum int value to transfer all images.
 	*/
 	void transfer_internal(unsigned int skip_images, unsigned int max_images, std::function<void(unsigned int, const PCOBuffer&)> image_callback);
+
+private:
+    HANDLE cam;
+
 };
 
 #endif //PCO_WRAPPER_H
